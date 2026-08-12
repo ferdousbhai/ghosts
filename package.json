@@ -4,7 +4,8 @@
   "type": "module",
   "packageManager": "pnpm@10.27.0",
   "scripts": {
-    "check": "pnpm typecheck && pnpm test",
+    "build": "pnpm --recursive build",
+    "check": "pnpm build && pnpm typecheck && pnpm test",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
