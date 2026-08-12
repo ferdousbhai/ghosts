@@ -54,6 +54,9 @@ describe("@summonghost/memory-contracts", () => {
   });
 
   it("keeps append and replace workflow contracts strict and app-neutral", () => {
+    const maximumLength = "x".repeat(MAX_RELATIONSHIP_MEMORY_LENGTH);
+    const oversized = `${maximumLength}x`;
+
     expect(relationshipMemoryAppendSchema.parse({
       content: "I am Canadian.",
     })).toEqual({ content: "I am Canadian." });
@@ -73,9 +76,26 @@ describe("@summonghost/memory-contracts", () => {
     }).success).toBe(false);
     expect(relationshipMemoryAppendSchema.safeParse({ content: "  " }).success)
       .toBe(false);
+    expect(relationshipMemoryAppendSchema.safeParse({
+      content: maximumLength,
+    }).success).toBe(true);
+    expect(relationshipMemoryAppendSchema.safeParse({ content: oversized }).success)
+      .toBe(false);
     expect(relationshipMemoryReplaceSchema.safeParse({
       oldText: "",
       newText: "coffee",
+    }).success).toBe(false);
+    expect(relationshipMemoryReplaceSchema.safeParse({
+      oldText: maximumLength,
+      newText: maximumLength,
+    }).success).toBe(true);
+    expect(relationshipMemoryReplaceSchema.safeParse({
+      oldText: oversized,
+      newText: "",
+    }).success).toBe(false);
+    expect(relationshipMemoryReplaceSchema.safeParse({
+      oldText: "tea",
+      newText: oversized,
     }).success).toBe(false);
   });
 
@@ -207,6 +227,59 @@ describe("@summonghost/memory-contracts", () => {
       requiredReduction: 2,
       maxLength: MAX_RELATIONSHIP_MEMORY_LENGTH,
     });
+  });
+
+  it("rejects invalid workflow operations before consumer-owned ports", async () => {
+    let repositoryCalls = 0;
+    let compactorCalls = 0;
+    const repository: RelationshipMemoryRepository = {
+      async read() {
+        repositoryCalls += 1;
+        return { content: "", revision: 1 };
+      },
+      async wasOperationApplied() {
+        repositoryCalls += 1;
+        return false;
+      },
+      async commit() {
+        repositoryCalls += 1;
+        return { status: "conflict" };
+      },
+    };
+    const oversized = "x".repeat(MAX_RELATIONSHIP_MEMORY_LENGTH + 1);
+    const mutations = [
+      { kind: "append", content: oversized },
+      { kind: "replace", oldText: oversized, newText: "" },
+      { kind: "replace", oldText: "x", newText: oversized },
+    ] as const;
+
+    for (const [index, mutation] of mutations.entries()) {
+      await expect(executeRelationshipMemoryOperation({
+        repository,
+        operationId: `oversized-${index}`,
+        operation: { kind: "mutate", mutation },
+        compactor: async () => {
+          compactorCalls += 1;
+          return "compacted";
+        },
+      })).rejects.toThrow();
+    }
+    for (const [index, operation] of [
+      { kind: "typo" },
+      { kind: "compact", unknown: true },
+    ].entries()) {
+      await expect(executeRelationshipMemoryOperation({
+        repository,
+        operationId: `invalid-operation-${index}`,
+        operation: operation as never,
+        compactor: async () => {
+          compactorCalls += 1;
+          return "compacted";
+        },
+      })).rejects.toThrow();
+    }
+    expect(repositoryCalls).toBe(0);
+    expect(compactorCalls).toBe(0);
   });
 
   it("executes mutation and compaction through consumer-owned ports", async () => {

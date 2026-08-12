@@ -113,10 +113,11 @@ export function isPiToolResult(value) {
     }
     return !("usage" in value) || value.usage === undefined || isPiToolUsage(value.usage);
 }
-/** Preserve shaped Pi results; wrap all other values as one text result. */
-export function toPiToolResult(value) {
-    if (isPiToolResult(value))
+/** Wrap a value as data, unless trusted Pi-result passthrough is explicit. */
+export function toPiToolResult(value, options = {}) {
+    if (options.trustPiResult === true && isPiToolResult(value)) {
         return value;
+    }
     return {
         content: [{ type: "text", text: stringifyToolResult(value) }],
         details: value,
@@ -196,7 +197,9 @@ export function adaptPiTool(options) {
                                 phase = "update";
                                 try {
                                     throwIfAborted(executionSignal);
-                                    const defaultResult = toPiToolResult(update);
+                                    const defaultResult = toPiToolResult(update, {
+                                        trustPiResult: options.trustExecutorResults,
+                                    });
                                     const mapped = options.mapUpdate?.(defaultResult, {
                                         input,
                                         name,
@@ -230,7 +233,9 @@ export function adaptPiTool(options) {
                     signal: executionSignal,
                     toolCallId,
                 };
-                const defaultResult = toPiToolResult(output);
+                const defaultResult = toPiToolResult(output, {
+                    trustPiResult: options.trustExecutorResults,
+                });
                 let result = options.mapResult
                     ? await options.mapResult(defaultResult, context)
                     : defaultResult;

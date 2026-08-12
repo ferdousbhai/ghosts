@@ -78,6 +78,7 @@ describe("provider normalization", () => {
         id: "exa-1",
         url: "https://example.com/article",
         highlights: ["Useful", "context"],
+        providerSecret: "must not escape",
       }],
     });
     const execution = await executeExaSearch(
@@ -90,8 +91,61 @@ describe("provider normalization", () => {
       contents: { highlights: true },
       moderation: true,
       numResults: 3,
+    }), { signal: undefined });
+    expect(execution.results[0]).toEqual({
+      highlights: ["Useful", "context"],
+      id: "exa-1",
+      text: "Useful context",
+      url: "https://example.com/article",
+    });
+  });
+
+  it("forwards Exa cancellation to the structural client", async () => {
+    const controller = new AbortController();
+    const providerAbort = vi.fn();
+    const search = vi.fn((
+      _query: string,
+      _options: Readonly<Record<string, unknown>>,
+      { signal }: Readonly<{ signal?: AbortSignal }>,
+    ) => new Promise<never>((_resolve, reject) => {
+      signal?.addEventListener("abort", () => {
+        providerAbort();
+        reject(signal.reason);
+      }, { once: true });
     }));
-    expect(execution.results[0]).toMatchObject({ id: "exa-1", text: "Useful context" });
+    const execution = executeExaSearch(
+      { search },
+      "agents",
+      {},
+      { signal: controller.signal },
+    );
+
+    expect(search).toHaveBeenCalledWith(
+      "agents",
+      expect.any(Object),
+      { signal: controller.signal },
+    );
+    controller.abort(new Error("cancelled"));
+
+    await expect(execution).rejects.toThrow("cancelled");
+    expect(providerAbort).toHaveBeenCalledOnce();
+  });
+
+  it("does not expose Exa provider errors", async () => {
+    const search = vi.fn().mockRejectedValue(
+      new Error("private Exa response detail"),
+    );
+
+    await expect(executeExaSearch({ search }, "agents"))
+      .rejects.toThrow(/^Exa research failed$/);
+    await expect(executeExaSearch({ search }, "agents"))
+      .rejects.not.toThrow("private Exa response detail");
+
+    const malformedSearch = vi.fn().mockResolvedValue({
+      results: [{ url: "private malformed provider value" }],
+    });
+    await expect(executeExaSearch({ search: malformedSearch }, "agents"))
+      .rejects.toThrow(/^Exa research returned invalid results$/);
   });
 
   it("normalizes Reddit without provider or app envelopes", () => {
@@ -170,11 +224,58 @@ describe("native xAI X search", () => {
     });
   });
 
-  it("rejects incomplete provider responses with attached usage", () => {
+  it("rejects provider errors with safe messages and attached usage", () => {
     expect(() => normalizeNativeXSearchResult({
-      status: "incomplete",
+      status: "incomplete: sensitive detail",
+      error: { message: "provider secret" },
       usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 },
-    })).toThrow("did not complete");
+    })).toThrow("xAI native X research did not complete");
+
+    try {
+      normalizeNativeXSearchResult({
+        error: { message: "provider secret" },
+        usage: {
+          input_tokens: 2,
+          output_tokens: 1,
+          private_usage_detail: "provider secret",
+          total_tokens: 3,
+        },
+      });
+      expect.fail("expected provider response to be rejected");
+    } catch (error) {
+      expect(error).toMatchObject({
+        message: "xAI native X research failed",
+        usage: { totalTokens: 3 },
+      });
+      expect((error as Error).message).not.toContain("provider secret");
+      expect(error).not.toHaveProperty("usage.raw");
+      expect(error).not.toHaveProperty("usage.private_usage_detail");
+    }
+  });
+
+  it("does not expose native X transport or parse details", async () => {
+    const transport = vi.fn().mockRejectedValue(
+      new Error("private xAI transport detail"),
+    );
+    await expect(runNativeXSearch({
+      model: "grok-4",
+      prompt: "Search X",
+      transport,
+    })).rejects.toThrow(/^xAI native X research failed$/);
+
+    try {
+      normalizeNativeXSearchResult({
+        output_text: "private invalid JSON",
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      });
+      expect.fail("expected invalid provider output to be rejected");
+    } catch (error) {
+      expect(error).toMatchObject({
+        message: "xAI native X research returned invalid structured output",
+      });
+      expect(error).not.toHaveProperty("cause");
+      expect(String(error)).not.toContain("private invalid JSON");
+    }
   });
 
   it("injects transport and preserves normalized metering", async () => {

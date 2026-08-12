@@ -27,9 +27,12 @@ export type ExecuteExaSearchOptions = Readonly<{
     textMaxCharacters?: number;
 }>;
 export type ExaSearchOptions = Readonly<Record<string, unknown>>;
-/** Structural Exa client contract; no exa-js version is required. */
+export type ExaSearchCallOptions = Readonly<{
+    signal?: AbortSignal;
+}>;
+/** Structural Exa client contract; implementations must forward the signal to their transport. */
 export type ExaSearchClient = Readonly<{
-    search: (query: string, options: ExaSearchOptions) => Promise<Readonly<{
+    search: (query: string, options: ExaSearchOptions, callOptions: ExaSearchCallOptions) => Promise<Readonly<{
         results: readonly unknown[];
     }>>;
 }>;

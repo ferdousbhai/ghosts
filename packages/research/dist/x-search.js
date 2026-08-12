@@ -75,24 +75,18 @@ export function normalizeNativeXSearchResult(untrusted, maxItems = X_SEARCH_MAX_
         throw new Error("xAI native X research returned an invalid response");
     const totalUsage = normalizeNativeXSearchUsage(record.usage ?? record.totalUsage);
     if (typeof record.status === "string" && record.status !== "completed") {
-        const providerError = asRecord(record.error);
-        throw meteredError(typeof providerError?.message === "string"
-            ? providerError.message
-            : `xAI native X research did not complete (${record.status})`, totalUsage);
+        throw meteredError("xAI native X research did not complete", totalUsage);
     }
     if (record.error) {
-        const providerError = asRecord(record.error);
-        throw meteredError(typeof providerError?.message === "string"
-            ? providerError.message
-            : "xAI native X research failed", totalUsage);
+        throw meteredError("xAI native X research failed", totalUsage);
     }
     const output = extractStructuredOutput(record);
     try {
         const parsed = xSearchOutputSchema.parse(output);
         return { items: parsed.items.slice(0, maxItems), totalUsage };
     }
-    catch (cause) {
-        throw meteredError("xAI native X research returned invalid structured output", totalUsage, cause);
+    catch {
+        throw meteredError("xAI native X research returned invalid structured output", totalUsage);
     }
 }
 export function normalizeNativeXSearchUsage(untrusted) {
@@ -117,7 +111,16 @@ export async function runNativeXSearch(options) {
     const maximumItems = options.maxItems ?? X_SEARCH_MAX_RESULTS;
     assertMaximumItems(maximumItems);
     const signal = withTimeout(options.abortSignal, options.timeoutMs);
-    const response = await options.transport(buildNativeXSearchRequest(options), { signal });
+    const request = buildNativeXSearchRequest(options);
+    let response;
+    try {
+        response = await options.transport(request, { signal });
+    }
+    catch {
+        if (signal.aborted)
+            throw signal.reason;
+        throw new Error("xAI native X research failed");
+    }
     return normalizeNativeXSearchResult(response, maximumItems);
 }
 function validateNativeToolOptions(options) {
@@ -168,8 +171,8 @@ function extractStructuredOutput(response) {
     try {
         return JSON.parse(text);
     }
-    catch (cause) {
-        throw meteredError("xAI native X research returned invalid structured output", normalizeNativeXSearchUsage(response.usage ?? response.totalUsage), cause);
+    catch {
+        throw meteredError("xAI native X research returned invalid structured output", normalizeNativeXSearchUsage(response.usage ?? response.totalUsage));
     }
 }
 function extractOutputText(output) {
@@ -216,8 +219,16 @@ function asRecord(value) {
         ? value
         : null;
 }
-function meteredError(message, usage, cause) {
-    const error = cause === undefined ? new Error(message) : new Error(message, { cause });
-    Object.defineProperty(error, "usage", { value: usage });
+function meteredError(message, usage) {
+    const error = new Error(message);
+    Object.defineProperty(error, "usage", {
+        value: {
+            cacheRead: usage.cacheRead,
+            cacheWrite: usage.cacheWrite,
+            input: usage.input,
+            output: usage.output,
+            totalTokens: usage.totalTokens,
+        },
+    });
     return error;
 }

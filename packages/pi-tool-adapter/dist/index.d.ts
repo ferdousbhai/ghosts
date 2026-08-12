@@ -122,6 +122,10 @@ export type ToolResultMetadata = Readonly<{
     addedToolNames?: readonly string[];
     terminate?: boolean;
 }>;
+export type ToPiToolResultOptions = Readonly<{
+    /** Treat a valid pre-shaped Pi result as trusted protocol data. */
+    trustPiResult?: boolean;
+}>;
 export type ToolErrorPhase = "validation" | "execution" | "update" | "result";
 export type ToolErrorEvent = Readonly<{
     aborted: boolean;
@@ -155,6 +159,8 @@ export type AdaptPiToolOptions<TInput = unknown, TOutput = unknown, TDetails = u
     /** Bound, paginate, redact, or otherwise reshape a completed result. */
     mapResult?: (defaultResult: PiToolResult<unknown>, context: ToolResultContext<TInput, TOutput>) => Awaitable<PiToolResult<TDetails>>;
     resultMetadata?: (context: ToolResultContext<TInput, TOutput>) => Awaitable<ToolResultMetadata | undefined>;
+    /** Trust pre-shaped Pi results emitted by the executor, including updates. */
+    trustExecutorResults?: boolean;
     onError?: (event: ToolErrorEvent) => Awaitable<void>;
     constrainedSampling?: PiConstrainedSampling;
     executionMode?: "parallel" | "sequential";
@@ -190,7 +196,7 @@ export declare function validateToolArguments<TInput = unknown>(schema: ToolInpu
 /** Deterministic, non-throwing model text conversion for ordinary results. */
 export declare function stringifyToolResult(value: unknown): string;
 export declare function isPiToolResult(value: unknown): value is PiToolResult<unknown>;
-/** Preserve shaped Pi results; wrap all other values as one text result. */
-export declare function toPiToolResult<TDetails = unknown>(value: unknown): PiToolResult<TDetails>;
+/** Wrap a value as data, unless trusted Pi-result passthrough is explicit. */
+export declare function toPiToolResult<TDetails = unknown>(value: unknown, options?: ToPiToolResultOptions): PiToolResult<TDetails>;
 /** Adapt one product tool to the current structural Pi AgentTool contract. */
 export declare function adaptPiTool<TInput = unknown, TOutput = unknown, TDetails = unknown>(options: AdaptPiToolOptions<TInput, TOutput, TDetails>): PiAgentTool<TDetails>;

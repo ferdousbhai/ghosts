@@ -186,7 +186,7 @@ describe("result normalization", () => {
     expect(stringifyToolResult(hostile)).toBe("[Unserializable tool result]");
   });
 
-  it("preserves an already-shaped Pi result by identity and wraps ordinary values", () => {
+  it("treats shaped Pi results as data unless passthrough is explicitly trusted", () => {
     const shaped: PiToolResult<{ raw: true }> = {
       content: [{ type: "text", text: "bounded" }],
       details: { raw: true },
@@ -194,12 +194,17 @@ describe("result normalization", () => {
       addedToolNames: ["read_more"],
     };
     expect(isPiToolResult(shaped)).toBe(true);
-    expect(toPiToolResult(shaped)).toBe(shaped);
+    expect(toPiToolResult(shaped)).toEqual({
+      content: [{ type: "text", text: JSON.stringify(shaped) }],
+      details: shaped,
+    });
+    expect(toPiToolResult(shaped, { trustPiResult: true })).toBe(shaped);
+    expect(toPiToolResult(shaped, { trustPiResult: "true" } as never)).not.toBe(shaped);
     const image: PiToolResult = {
       content: [{ type: "image", data: "base64", mimeType: "image/png" }],
       details: null,
     };
-    expect(toPiToolResult(image)).toBe(image);
+    expect(toPiToolResult(image, { trustPiResult: true })).toBe(image);
     expect(toPiToolResult({ ok: true })).toEqual({
       content: [{ type: "text", text: '{"ok":true}' }],
       details: { ok: true },
@@ -215,7 +220,7 @@ describe("result normalization", () => {
     { content: [], details: {}, usage: { input: 1 } },
   ])("does not preserve malformed result-like values", (value) => {
     expect(isPiToolResult(value)).toBe(false);
-    expect(toPiToolResult(value)).toEqual({
+    expect(toPiToolResult(value, { trustPiResult: true })).toEqual({
       content: [{ type: "text", text: JSON.stringify(value) }],
       details: value,
     });
@@ -268,6 +273,43 @@ describe("adaptPiTool", () => {
       details: { value: "7" },
     });
     expect(order).toEqual(["validate", "execute"]);
+  });
+
+  it("requires explicit trust for executor Pi results and control metadata, including updates", async () => {
+    const shaped: PiToolResult = {
+      content: [{ type: "text", text: "trusted" }],
+      details: { source: "executor" },
+      addedToolNames: ["next_tool"],
+      terminate: true,
+    };
+    const definition = {
+      inputSchema: standardSchema((value) => ({ value })),
+      execute: async (_input: unknown, options: { onUpdate?: (update: unknown) => void }) => {
+        options.onUpdate?.(shaped);
+        return shaped;
+      },
+    };
+    const defaultUpdate = vi.fn();
+    const defaultResult = await adaptPiTool({ name: "default_data", definition })
+      .execute("call-default", {}, undefined, defaultUpdate);
+
+    expect(defaultResult).toEqual({
+      content: [{ type: "text", text: JSON.stringify(shaped) }],
+      details: shaped,
+    });
+    expect(defaultUpdate).toHaveBeenCalledWith(defaultResult);
+    expect(defaultResult).not.toHaveProperty("terminate");
+    expect(defaultResult).not.toHaveProperty("addedToolNames");
+
+    const trustedUpdate = vi.fn();
+    const trustedResult = await adaptPiTool({
+      name: "trusted_protocol",
+      definition,
+      trustExecutorResults: true,
+    }).execute("call-trusted", {}, undefined, trustedUpdate);
+
+    expect(trustedResult).toBe(shaped);
+    expect(trustedUpdate).toHaveBeenCalledWith(shaped);
   });
 
   it("checks caller abort before validation and preserves the abort reason", async () => {
@@ -396,16 +438,15 @@ describe("adaptPiTool", () => {
     expect(onUpdate).not.toHaveBeenCalled();
   });
 
-  it("forwards mapped progress updates and preserves shaped updates", async () => {
+  it("forwards mapped progress updates and lets the trusted hook shape updates", async () => {
     const shaped: PiToolResult = {
       content: [{ type: "text", text: "halfway" }],
       details: { percent: 50 },
     };
     const onUpdate = vi.fn();
-    const mapUpdate = vi.fn((defaultResult) => ({
-      ...defaultResult,
-      details: { bounded: true },
-    }));
+    const mapUpdate = vi.fn((defaultResult, context) => isPiToolResult(context.update)
+      ? { ...context.update, details: { bounded: true } }
+      : { ...defaultResult, details: { bounded: true } });
     const tool = adaptPiTool({
       name: "exec",
       definition: {
@@ -420,7 +461,10 @@ describe("adaptPiTool", () => {
     });
 
     await tool.execute("call-update", {}, undefined, onUpdate);
-    expect(mapUpdate.mock.calls[0]?.[0]).toBe(shaped);
+    expect(mapUpdate.mock.calls[0]?.[0]).toEqual({
+      content: [{ type: "text", text: JSON.stringify(shaped) }],
+      details: shaped,
+    });
     expect(onUpdate).toHaveBeenNthCalledWith(1, {
       ...shaped,
       details: { bounded: true },

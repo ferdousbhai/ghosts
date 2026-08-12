@@ -32,8 +32,12 @@ export function renderFeedbackContext(
   const rendered: string[] = [];
   const seen = new Set<string>();
 
-  for (const reaction of reactions) {
-    if (rendered.length >= MAX_REACTIONS_PER_MESSAGE) break;
+  const reactionLimit = Math.min(
+    reactions.length,
+    MAX_REACTIONS_PER_MESSAGE,
+  );
+  for (let reactionIndex = 0; reactionIndex < reactionLimit; reactionIndex += 1) {
+    const reaction = reactions[reactionIndex];
     const value = boundedText(reaction.value, MAX_REACTION_CHARACTERS);
     if (!value) continue;
     const by = boundedText(reaction.by, MAX_ATTRIBUTION_CHARACTERS);
@@ -60,12 +64,30 @@ export function decorateAssistantMessageFeedback<
   append: FeedbackMessageAppender<Message> = appendToStringContent,
 ): Message[] {
   const reactionsByIndex = new Map<number, FeedbackReaction[]>();
-  for (const entry of feedback) {
+  for (
+    let feedbackIndex = 0;
+    feedbackIndex < feedback.length;
+    feedbackIndex += 1
+  ) {
+    const entry = feedback[feedbackIndex];
     if (!Number.isSafeInteger(entry.messageIndex) || entry.messageIndex < 0) {
       continue;
     }
+    const message = messages[entry.messageIndex];
+    if (!message || message.role !== "assistant") continue;
+
     const reactions = reactionsByIndex.get(entry.messageIndex) ?? [];
-    reactions.push(...entry.reactions);
+    const reactionLimit = Math.min(
+      entry.reactions.length,
+      MAX_REACTIONS_PER_MESSAGE - reactions.length,
+    );
+    for (
+      let reactionIndex = 0;
+      reactionIndex < reactionLimit;
+      reactionIndex += 1
+    ) {
+      reactions.push(entry.reactions[reactionIndex]);
+    }
     reactionsByIndex.set(entry.messageIndex, reactions);
   }
 
@@ -77,11 +99,11 @@ export function decorateAssistantMessageFeedback<
     if (!rendered) continue;
     const decorated = append(message, rendered);
     if (!decorated || decorated === message) continue;
-    result ??= [...messages];
+    result ??= messages.slice();
     result[messageIndex] = decorated;
   }
 
-  return result ?? [...messages];
+  return result ?? messages.slice();
 }
 
 function appendToStringContent<Message extends FeedbackMessage>(
@@ -100,11 +122,11 @@ function boundedText(
   maximumCharacters: number,
 ): string | null {
   if (typeof value !== "string") return null;
-  const normalized = value.trim();
-  if (!normalized) return null;
-  const characters = Array.from(normalized);
-  if (characters.length > maximumCharacters) return null;
-  return normalized;
+  const characters = value[Symbol.iterator]();
+  for (let count = 0; count <= maximumCharacters; count += 1) {
+    if (characters.next().done) return value.trim() || null;
+  }
+  return null;
 }
 
 function escapeXml(value: string): string {

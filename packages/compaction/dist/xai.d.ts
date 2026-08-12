@@ -1,4 +1,7 @@
 export declare const XAI_DEFAULT_COMPACTION_TIMEOUT_MS = 30000;
+export declare const XAI_COMPACTION_MAX_RESPONSE_BYTES: number;
+export declare const XAI_COMPACTION_MAX_TOKENS = 2000000;
+export declare const XAI_COMPACTION_MAX_ENCRYPTED_CONTENT_CHARACTERS: number;
 export type XaiResponsesInputItem = Record<string, unknown>;
 export type XaiNativeUsage = Readonly<{
     cacheReadInputTokens: number;

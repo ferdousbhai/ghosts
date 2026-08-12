@@ -29,6 +29,20 @@ export declare const relationshipMemoryMutationSchema: z.ZodDiscriminatedUnion<[
     newText: z.ZodString;
     kind: z.ZodLiteral<"replace">;
 }, z.core.$strict>], "kind">;
+/** Strict runtime contract for workflow state transitions. */
+export declare const relationshipMemoryOperationSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    kind: z.ZodLiteral<"mutate">;
+    mutation: z.ZodDiscriminatedUnion<[z.ZodObject<{
+        content: z.ZodString;
+        kind: z.ZodLiteral<"append">;
+    }, z.core.$strict>, z.ZodObject<{
+        oldText: z.ZodString;
+        newText: z.ZodString;
+        kind: z.ZodLiteral<"replace">;
+    }, z.core.$strict>], "kind">;
+}, z.core.$strict>, z.ZodObject<{
+    kind: z.ZodLiteral<"compact">;
+}, z.core.$strict>], "kind">;
 export type ParsedMemory = string;
 export type RememberInput = z.infer<typeof rememberInputSchema>;
 export type ForgetInput = z.infer<typeof forgetInputSchema>;

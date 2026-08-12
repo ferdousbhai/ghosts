@@ -38,6 +38,10 @@ const result = await runNativeXSearch({
 
 Keep credentials outside library inputs and validate redirects/DNS resolution at the fetch boundary. `assertPublicHttpsUrl` rejects explicit non-public destinations, but hostname validation alone cannot prevent DNS rebinding.
 
+## Exa client
+
+`executeExaSearch` uses a structural client rather than depending on `exa-js`. Its `search` method receives `{ signal }` as a third argument; implementations must forward that signal to the underlying HTTP request so cancellation stops provider work. A client that silently ignores the third argument is not compatible—wrap or replace SDK methods that do not support transport cancellation. Normalized results contain only the documented Exa result fields; unknown provider fields are stripped.
+
 ## Consumer adaptations
 
 - `runNativeXSearch` no longer accepts a pi-ai model/stream facade or an AI SDK `LanguageModel`; pass an xAI model ID and structural `transport(request, { signal })` instead.
@@ -45,4 +49,5 @@ Keep credentials outside library inputs and validate redirects/DNS resolution at
 - The shared `web_search` contract is the richer multi-query contract from ask-dan. Consumers using summon-ghost's former `{ query }`-only schema may continue passing just `query`, but parsed defaults are now present.
 - `x_search` uses the portable `{ query, from_date?, to_date?, depth? }` base contract. Delegated-agent tools and app-specific synthesis envelopes are intentionally excluded.
 - `formatWebSearchResults` uses the summon-ghost bounded Markdown contract and accepts only `results`; ask-dan consumers must remove the former leading `query` argument and should not expect XML.
-- `executeExaSearch` accepts an optional request as its third argument. summon-ghost's former execution options move to the fourth argument (or pass `{}` as request).
+- `executeExaSearch` accepts an optional request as its third argument. summon-ghost's former execution options move to the fourth argument (or pass `{}` as request). Structural Exa clients must accept call options as a third `search` argument and forward `callOptions.signal` to their HTTP transport.
+- Exa and native X provider/transport details are not exposed through public errors. Metered native X errors attach only normalized numeric usage (never raw provider usage); consumers should log private diagnostics inside their injected structural client or transport.

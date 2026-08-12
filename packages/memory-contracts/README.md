@@ -27,12 +27,13 @@ forgetInputSchema.parse({
 - `relationshipMemoryAppendSchema`: `{ content }`
 - `relationshipMemoryReplaceSchema`: `{ oldText, newText }`
 - `relationshipMemoryMutationSchema`: the append/replace union
+- `relationshipMemoryOperationSchema`: the strict mutate/compact state-transition union
 
-An empty `newText` removes the uniquely matched `oldText`. These functions perform no I/O.
+An empty `newText` removes the uniquely matched `oldText`. The workflow schemas allow exact multi-line blocks and bound each mutation string to `MAX_RELATIONSHIP_MEMORY_LENGTH`. These functions perform no I/O.
 
 ## State machine boundary
 
-`executeRelationshipMemoryOperation` owns deterministic mutation semantics, operation replay detection, compaction validation, and optimistic conflict retries. Consumers inject `RelationshipMemoryRepository` and, when needed, `RelationshipMemoryCompactor`.
+`executeRelationshipMemoryOperation` owns deterministic mutation semantics, operation replay detection, compaction validation, and optimistic conflict retries. It validates the complete strict operation union and bounded mutation payload at runtime before calling consumer-owned ports. Consumers inject `RelationshipMemoryRepository` and, when needed, `RelationshipMemoryCompactor`.
 
 The package intentionally contains no application scope or audience, persistence implementation, authorization, billing, provider selection, background dispatch, or telemetry policy. Consumers attach those concerns in adapters around the repository and compactor ports.
 

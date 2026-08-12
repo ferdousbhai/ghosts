@@ -1,19 +1,23 @@
 export const XAI_DEFAULT_COMPACTION_TIMEOUT_MS = 30_000;
+export const XAI_COMPACTION_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+export const XAI_COMPACTION_MAX_TOKENS = 2_000_000;
+export const XAI_COMPACTION_MAX_ENCRYPTED_CONTENT_CHARACTERS = 8 * 1024 * 1024;
 export function createXaiCompactionAdapter(options) {
     const timeoutMs = positiveSafeInteger(options.timeoutMs ?? XAI_DEFAULT_COMPACTION_TIMEOUT_MS, "timeoutMs");
     const countInputTokens = async (input) => {
         const model = requiredString(input.model, "model");
-        const response = await requestWithTimeout(options.request, {
+        const payload = asRecord(await requestJsonWithTimeout(options.request, {
             body: {
                 model,
                 text: JSON.stringify(input.items),
             },
             path: "/tokenize-text",
-        }, timeoutMs, "xAI context token counting timed out");
-        await assertSuccessfulResponse(response, "xAI context token counting");
-        const tokenIds = asRecord(await response.json())?.token_ids;
-        if (!Array.isArray(tokenIds)) {
-            throw new Error("xAI context token counting returned no token IDs");
+        }, timeoutMs, "xAI context token counting"));
+        const tokenIds = payload?.token_ids;
+        if (!Array.isArray(tokenIds) ||
+            tokenIds.length > XAI_COMPACTION_MAX_TOKENS ||
+            !tokenIds.every((tokenId) => readTokenId(tokenId) !== null)) {
+            throw new Error("xAI context token counting returned invalid token IDs");
         }
         return tokenIds.length;
     };
@@ -22,7 +26,7 @@ export function createXaiCompactionAdapter(options) {
         if (input.items.length === 0) {
             throw new Error("Cannot compact an empty xAI context");
         }
-        const response = await requestWithTimeout(options.request, {
+        const payload = asRecord(await requestJsonWithTimeout(options.request, {
             body: {
                 model,
                 input: input.items,
@@ -31,9 +35,7 @@ export function createXaiCompactionAdapter(options) {
                 conversationId: input.conversationId,
             }),
             path: "/responses/compact",
-        }, timeoutMs, "xAI context compaction timed out");
-        await assertSuccessfulResponse(response, "xAI context compaction");
-        const payload = asRecord(await response.json());
+        }, timeoutMs, "xAI context compaction"));
         const items = asInputItems(payload?.output);
         if (items?.length !== 1 || !readCompactionItem(items[0])) {
             throw new Error("xAI context compaction returned no valid compaction item");
@@ -96,13 +98,13 @@ export function parseXaiNativeUsage(value) {
     const usage = asRecord(value);
     if (!usage)
         return null;
-    const inputTokens = readNonNegativeSafeInteger(usage.input_tokens);
-    const outputTokens = readNonNegativeSafeInteger(usage.output_tokens);
-    const totalTokens = readNonNegativeSafeInteger(usage.total_tokens);
+    const inputTokens = readTokenCount(usage.input_tokens);
+    const outputTokens = readTokenCount(usage.output_tokens);
+    const totalTokens = readTokenCount(usage.total_tokens);
     const inputTokenDetails = usage.input_tokens_details === undefined
         ? null
         : asRecord(usage.input_tokens_details);
-    const cacheReadInputTokens = readOptionalNonNegativeSafeInteger(inputTokenDetails?.cached_tokens, 0);
+    const cacheReadInputTokens = readOptionalTokenCount(inputTokenDetails?.cached_tokens, 0);
     const costUsdTicks = readOptionalNonNegativeSafeInteger(usage.cost_in_usd_ticks, null);
     const serverSideToolCalls = readOptionalNonNegativeSafeInteger(usage.num_server_side_tools_used, 0);
     if (inputTokens === null ||
@@ -171,36 +173,107 @@ function readCompactionItem(value) {
         typeof item.id === "string" &&
         item.id.length > 0 &&
         typeof item.encrypted_content === "string" &&
-        item.encrypted_content.length > 0
+        item.encrypted_content.length > 0 &&
+        item.encrypted_content.length <=
+            XAI_COMPACTION_MAX_ENCRYPTED_CONTENT_CHARACTERS
         ? item
         : null;
 }
-async function requestWithTimeout(request, input, timeoutMs, timeoutMessage) {
+class XaiResponseLimitError extends Error {
+}
+async function requestJsonWithTimeout(request, input, timeoutMs, operation) {
     const controller = new AbortController();
+    const timeoutError = new Error(`${operation} timed out`);
     let timeoutId;
     const timeout = new Promise((_resolve, reject) => {
         timeoutId = setTimeout(() => {
-            const error = new Error(timeoutMessage);
-            controller.abort(error);
-            reject(error);
+            controller.abort(timeoutError);
+            reject(timeoutError);
         }, timeoutMs);
     });
+    const readResponse = async () => {
+        let response;
+        try {
+            response = await request({ ...input, signal: controller.signal });
+        }
+        catch {
+            if (controller.signal.aborted)
+                throw timeoutError;
+            throw new Error(`${operation} failed`);
+        }
+        if (!response.ok) {
+            void response.body?.cancel().catch(() => { });
+            throw new Error(`${operation} failed (${response.status})`);
+        }
+        let text;
+        try {
+            text = await readBoundedResponseText(response, XAI_COMPACTION_MAX_RESPONSE_BYTES, controller.signal);
+        }
+        catch (error) {
+            if (controller.signal.aborted)
+                throw timeoutError;
+            if (error instanceof XaiResponseLimitError) {
+                throw new Error(`${operation} response is too large`);
+            }
+            throw new Error(`${operation} failed while reading response`);
+        }
+        try {
+            return JSON.parse(text);
+        }
+        catch {
+            throw new Error(`${operation} returned invalid JSON`);
+        }
+    };
     try {
-        return await Promise.race([
-            request({ ...input, signal: controller.signal }),
-            timeout,
-        ]);
+        return await Promise.race([readResponse(), timeout]);
     }
     finally {
         if (timeoutId !== undefined)
             clearTimeout(timeoutId);
     }
 }
-async function assertSuccessfulResponse(response, operation) {
-    if (response.ok)
-        return;
-    const detail = (await response.text().catch(() => "")).slice(0, 1_000);
-    throw new Error(`${operation} failed (${response.status})${detail ? `: ${detail}` : ""}`);
+async function readBoundedResponseText(response, maxBytes, signal) {
+    if (signal.aborted) {
+        await response.body?.cancel().catch(() => { });
+        throw signal.reason;
+    }
+    const declaredLength = response.headers.get("Content-Length");
+    if (declaredLength &&
+        /^\d+$/.test(declaredLength) &&
+        Number(declaredLength) > maxBytes) {
+        void response.body?.cancel().catch(() => { });
+        throw new XaiResponseLimitError();
+    }
+    if (!response.body)
+        return "";
+    const reader = response.body.getReader();
+    const cancel = () => {
+        void reader.cancel().catch(() => { });
+    };
+    signal.addEventListener("abort", cancel, { once: true });
+    const decoder = new TextDecoder();
+    let bytes = 0;
+    let result = "";
+    try {
+        while (true) {
+            if (signal.aborted)
+                throw signal.reason;
+            const { done, value } = await reader.read();
+            if (done)
+                break;
+            bytes += value.byteLength;
+            if (bytes > maxBytes) {
+                await reader.cancel().catch(() => { });
+                throw new XaiResponseLimitError();
+            }
+            result += decoder.decode(value, { stream: true });
+        }
+        return result + decoder.decode();
+    }
+    finally {
+        signal.removeEventListener("abort", cancel);
+        reader.releaseLock();
+    }
 }
 function positiveSafeInteger(value, name) {
     if (!Number.isSafeInteger(value) || value < 1) {
@@ -220,6 +293,16 @@ function readNonNegativeSafeInteger(value) {
     return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
         ? value
         : null;
+}
+function readTokenCount(value) {
+    const count = readNonNegativeSafeInteger(value);
+    return count !== null && count <= XAI_COMPACTION_MAX_TOKENS ? count : null;
+}
+function readOptionalTokenCount(value, missingValue) {
+    return value === undefined ? missingValue : readTokenCount(value);
+}
+function readTokenId(value) {
+    return readNonNegativeSafeInteger(value);
 }
 function saturatingAdd(left, right) {
     return left > Number.MAX_SAFE_INTEGER - right

@@ -27,21 +27,35 @@ export const forgetInputSchema = z.strictObject({
 });
 /** Pure append contract. It contains no application scope. */
 export const relationshipMemoryAppendSchema = z.strictObject({
-    content: z.string().refine((value) => value.trim().length > 0, {
+    content: z
+        .string()
+        .max(MAX_RELATIONSHIP_MEMORY_LENGTH)
+        .refine((value) => value.trim().length > 0, {
         message: "content is required",
     }),
 });
 /** Pure exact-text replacement contract. An empty newText removes oldText. */
 export const relationshipMemoryReplaceSchema = z.strictObject({
-    oldText: z.string().refine((value) => value.trim().length > 0, {
+    oldText: z
+        .string()
+        .max(MAX_RELATIONSHIP_MEMORY_LENGTH)
+        .refine((value) => value.trim().length > 0, {
         message: "oldText is required",
     }),
-    newText: z.string(),
+    newText: z.string().max(MAX_RELATIONSHIP_MEMORY_LENGTH),
 });
 /** Repository/workflow mutation union. */
 export const relationshipMemoryMutationSchema = z.discriminatedUnion("kind", [
     relationshipMemoryAppendSchema.extend({ kind: z.literal("append") }),
     relationshipMemoryReplaceSchema.extend({ kind: z.literal("replace") }),
+]);
+/** Strict runtime contract for workflow state transitions. */
+export const relationshipMemoryOperationSchema = z.discriminatedUnion("kind", [
+    z.strictObject({
+        kind: z.literal("mutate"),
+        mutation: relationshipMemoryMutationSchema,
+    }),
+    z.strictObject({ kind: z.literal("compact") }),
 ]);
 export class RelationshipMemoryConflictError extends Error {
     attempts;
@@ -249,6 +263,8 @@ export async function executeRelationshipMemoryOperation(input) {
     if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) {
         throw new Error("Relationship-memory max attempts must be a positive integer");
     }
+    const operation = relationshipMemoryOperationSchema.parse(input.operation);
+    const mutation = operation.kind === "mutate" ? operation.mutation : null;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         if (await input.repository.wasOperationApplied(operationId)) {
             return {
@@ -268,8 +284,8 @@ export async function executeRelationshipMemoryOperation(input) {
                 attempts: attempt,
             };
         }
-        const mutationResult = input.operation.kind === "mutate"
-            ? applyRelationshipMemoryMutation(document.content, input.operation.mutation)
+        const mutationResult = mutation
+            ? applyRelationshipMemoryMutation(document.content, mutation)
             : { content: document.content, changed: false };
         let content = mutationResult.content;
         let compacted = false;

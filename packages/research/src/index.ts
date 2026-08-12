@@ -57,6 +57,7 @@ export {
   executeExaSearch,
   mapExaCategory,
   type ExaResearchResult,
+  type ExaSearchCallOptions,
   type ExaSearchClient,
   type ExaSearchExecution,
   type ExaSearchOptions,

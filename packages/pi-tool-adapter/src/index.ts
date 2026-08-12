@@ -151,6 +151,11 @@ export type ToolResultMetadata = Readonly<{
   terminate?: boolean;
 }>;
 
+export type ToPiToolResultOptions = Readonly<{
+  /** Treat a valid pre-shaped Pi result as trusted protocol data. */
+  trustPiResult?: boolean;
+}>;
+
 export type ToolErrorPhase = "validation" | "execution" | "update" | "result";
 
 export type ToolErrorEvent = Readonly<{
@@ -198,6 +203,8 @@ export type AdaptPiToolOptions<TInput = unknown, TOutput = unknown, TDetails = u
   resultMetadata?: (
     context: ToolResultContext<TInput, TOutput>,
   ) => Awaitable<ToolResultMetadata | undefined>;
+  /** Trust pre-shaped Pi results emitted by the executor, including updates. */
+  trustExecutorResults?: boolean;
   onError?: (event: ToolErrorEvent) => Awaitable<void>;
   constrainedSampling?: PiConstrainedSampling;
   executionMode?: "parallel" | "sequential";
@@ -337,11 +344,14 @@ export function isPiToolResult(value: unknown): value is PiToolResult<unknown> {
   return !("usage" in value) || value.usage === undefined || isPiToolUsage(value.usage);
 }
 
-/** Preserve shaped Pi results; wrap all other values as one text result. */
+/** Wrap a value as data, unless trusted Pi-result passthrough is explicit. */
 export function toPiToolResult<TDetails = unknown>(
   value: unknown,
+  options: ToPiToolResultOptions = {},
 ): PiToolResult<TDetails> {
-  if (isPiToolResult(value)) return value as PiToolResult<TDetails>;
+  if (options.trustPiResult === true && isPiToolResult(value)) {
+    return value as PiToolResult<TDetails>;
+  }
   return {
     content: [{ type: "text", text: stringifyToolResult(value) }],
     details: value as TDetails,
@@ -421,7 +431,9 @@ export function adaptPiTool<TInput = unknown, TOutput = unknown, TDetails = unkn
                   phase = "update";
                   try {
                     throwIfAborted(executionSignal);
-                    const defaultResult = toPiToolResult(update);
+                    const defaultResult = toPiToolResult(update, {
+                      trustPiResult: options.trustExecutorResults,
+                    });
                     const mapped = options.mapUpdate?.(defaultResult, {
                       input,
                       name,
@@ -453,7 +465,9 @@ export function adaptPiTool<TInput = unknown, TOutput = unknown, TDetails = unkn
           signal: executionSignal,
           toolCallId,
         } as const;
-        const defaultResult = toPiToolResult(output);
+        const defaultResult = toPiToolResult(output, {
+          trustPiResult: options.trustExecutorResults,
+        });
         let result = options.mapResult
           ? await options.mapResult(defaultResult, context)
           : defaultResult as PiToolResult<TDetails>;

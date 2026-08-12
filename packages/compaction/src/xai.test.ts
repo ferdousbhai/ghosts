@@ -3,6 +3,9 @@ import {
   buildXaiCompactionInput,
   createXaiCompactionAdapter,
   parseXaiNativeUsage,
+  XAI_COMPACTION_MAX_ENCRYPTED_CONTENT_CHARACTERS,
+  XAI_COMPACTION_MAX_RESPONSE_BYTES,
+  XAI_COMPACTION_MAX_TOKENS,
   readXaiCompletedResponseOutput,
   readXaiResponseInput,
   type XaiCompactionTransportRequest,
@@ -101,10 +104,36 @@ describe("xAI native compaction adapter", () => {
 
   it("rejects unsuccessful, malformed, and unsafe provider responses", async () => {
     const httpFailure = createXaiCompactionAdapter({
-      request: async () => new Response("denied", { status: 403 }),
+      request: async () => new Response("private provider detail", { status: 403 }),
     });
     await expect(httpFailure.countInputTokens({ items: [], model: "grok-4" }))
-      .rejects.toThrow("xAI context token counting failed (403): denied");
+      .rejects.toThrow(/^xAI context token counting failed \(403\)$/);
+    await expect(httpFailure.countInputTokens({ items: [], model: "grok-4" }))
+      .rejects.not.toThrow("private provider detail");
+
+    const transportFailure = createXaiCompactionAdapter({
+      request: async () => {
+        throw new Error("secret transport detail");
+      },
+    });
+    await expect(transportFailure.countInputTokens({ items: [], model: "grok-4" }))
+      .rejects.toThrow(/^xAI context token counting failed$/);
+
+    const invalidJson = createXaiCompactionAdapter({
+      request: async () => new Response("private invalid JSON"),
+    });
+    await expect(invalidJson.countInputTokens({ items: [], model: "grok-4" }))
+      .rejects.toThrow(/^xAI context token counting returned invalid JSON$/);
+
+    const bodyReadFailure = createXaiCompactionAdapter({
+      request: async () => new Response(new ReadableStream({
+        pull: (controller) => {
+          controller.error(new Error("secret body read detail"));
+        },
+      })),
+    });
+    await expect(bodyReadFailure.countInputTokens({ items: [], model: "grok-4" }))
+      .rejects.toThrow(/^xAI context token counting failed while reading response$/);
 
     const malformed = createXaiCompactionAdapter({
       request: async () => Response.json({
@@ -116,6 +145,50 @@ describe("xAI native compaction adapter", () => {
       .rejects.toThrow("returned no valid compaction item");
     await expect(malformed.compactInput({ items: [], model: "grok-4" }))
       .rejects.toThrow("Cannot compact an empty xAI context");
+  });
+
+  it("caps response bodies, token IDs, and encrypted compaction content", async () => {
+    const oversizedBody = createXaiCompactionAdapter({
+      request: async () => new Response(
+        new Uint8Array(XAI_COMPACTION_MAX_RESPONSE_BYTES + 1),
+      ),
+    });
+    await expect(oversizedBody.countInputTokens({ items: [], model: "grok-4" }))
+      .rejects.toThrow("xAI context token counting response is too large");
+
+    const oversizedTokenIds = createXaiCompactionAdapter({
+      request: async () => new Response(
+        `{"token_ids":[${"0,".repeat(XAI_COMPACTION_MAX_TOKENS)}0]}`,
+        { headers: { "Content-Type": "application/json" } },
+      ),
+    });
+    await expect(oversizedTokenIds.countInputTokens({ items: [], model: "grok-4" }))
+      .rejects.toThrow("returned invalid token IDs");
+
+    for (const tokenId of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const invalidTokenId = createXaiCompactionAdapter({
+        request: async () => Response.json({ token_ids: [tokenId] }),
+      });
+      await expect(invalidTokenId.countInputTokens({ items: [], model: "grok-4" }))
+        .rejects.toThrow("returned invalid token IDs");
+    }
+
+    const oversizedEncryptedContent = createXaiCompactionAdapter({
+      request: async () => Response.json({
+        output: [{
+          encrypted_content: "x".repeat(
+            XAI_COMPACTION_MAX_ENCRYPTED_CONTENT_CHARACTERS + 1,
+          ),
+          id: "cmp_1",
+          type: "compaction",
+        }],
+        usage,
+      }),
+    });
+    await expect(oversizedEncryptedContent.compactInput({
+      items: [{ role: "user" }],
+      model: "grok-4",
+    })).rejects.toThrow("returned no valid compaction item");
   });
 
   it("aborts transport at the configured timeout", async () => {
@@ -131,6 +204,50 @@ describe("xAI native compaction adapter", () => {
     await expect(adapter.countInputTokens({ items: [], model: "grok-4" }))
       .rejects.toThrow("xAI context token counting timed out");
     expect(signal?.aborted).toBe(true);
+  });
+
+  it("keeps the timeout active while reading the response body", async () => {
+    let bodyCancelled = false;
+    let signal: AbortSignal | undefined;
+    const adapter = createXaiCompactionAdapter({
+      request: async (input) => {
+        signal = input.signal;
+        return new Response(new ReadableStream({
+          cancel: () => {
+            bodyCancelled = true;
+          },
+          start: (controller) => {
+            controller.enqueue(new TextEncoder().encode("{\"token_ids\":["));
+          },
+        }));
+      },
+      timeoutMs: 1,
+    });
+
+    await expect(adapter.countInputTokens({ items: [], model: "grok-4" }))
+      .rejects.toThrow("xAI context token counting timed out");
+    expect(signal?.aborted).toBe(true);
+    expect(bodyCancelled).toBe(true);
+  });
+
+  it("cancels a response body returned after the timeout", async () => {
+    let bodyCancelled = false;
+    const adapter = createXaiCompactionAdapter({
+      request: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return new Response(new ReadableStream({
+          cancel: () => {
+            bodyCancelled = true;
+          },
+        }));
+      },
+      timeoutMs: 1,
+    });
+
+    await expect(adapter.countInputTokens({ items: [], model: "grok-4" }))
+      .rejects.toThrow("xAI context token counting timed out");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(bodyCancelled).toBe(true);
   });
 });
 
@@ -172,5 +289,10 @@ describe("xAI payload helpers", () => {
       .toBeNull();
     expect(parseXaiNativeUsage({ input_tokens: 1, output_tokens: 0, total_tokens: 1.5 }))
       .toBeNull();
+    expect(parseXaiNativeUsage({
+      input_tokens: XAI_COMPACTION_MAX_TOKENS + 1,
+      output_tokens: 0,
+      total_tokens: XAI_COMPACTION_MAX_TOKENS + 1,
+    })).toBeNull();
   });
 });

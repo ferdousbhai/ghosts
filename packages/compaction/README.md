@@ -35,4 +35,6 @@ import {
 } from "@summonghost/compaction/xai";
 ```
 
-The adapter uses `/tokenize-text` and `/responses/compact`, applies a bounded timeout, and strictly validates compaction items and usage. It depends only on standard web APIs (`AbortController`, `Response`, and `TextEncoder`); there are no runtime package dependencies.
+The adapter uses `/tokenize-text` and `/responses/compact`. Its timeout remains active while the response body is streamed, and the transport signal is aborted on expiry. Responses are limited to 16 MiB, token counts and token-ID arrays to 2,000,000, and encrypted compaction content to 8 Mi characters; the exported `XAI_COMPACTION_MAX_*` constants expose these boundaries. Compaction items, token IDs, and usage are strictly validated.
+
+Errors returned by the provider or application-owned transport are normalized: public messages retain an HTTP status when available but never include upstream response bodies, invalid JSON, or transport error details. The adapter depends only on standard web APIs (`AbortController`, `Response`, `TextDecoder`, `TextEncoder`, and `ReadableStream`); there are no runtime package dependencies.

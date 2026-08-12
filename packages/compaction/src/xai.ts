@@ -1,4 +1,7 @@
 export const XAI_DEFAULT_COMPACTION_TIMEOUT_MS = 30_000;
+export const XAI_COMPACTION_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+export const XAI_COMPACTION_MAX_TOKENS = 2_000_000;
+export const XAI_COMPACTION_MAX_ENCRYPTED_CONTENT_CHARACTERS = 8 * 1024 * 1024;
 
 export type XaiResponsesInputItem = Record<string, unknown>;
 
@@ -71,7 +74,7 @@ export function createXaiCompactionAdapter(options: {
     input,
   ) => {
     const model = requiredString(input.model, "model");
-    const response = await requestWithTimeout(
+    const payload = asRecord(await requestJsonWithTimeout(
       options.request,
       {
         body: {
@@ -81,12 +84,15 @@ export function createXaiCompactionAdapter(options: {
         path: "/tokenize-text",
       },
       timeoutMs,
-      "xAI context token counting timed out",
-    );
-    await assertSuccessfulResponse(response, "xAI context token counting");
-    const tokenIds = asRecord(await response.json())?.token_ids;
-    if (!Array.isArray(tokenIds)) {
-      throw new Error("xAI context token counting returned no token IDs");
+      "xAI context token counting",
+    ));
+    const tokenIds = payload?.token_ids;
+    if (
+      !Array.isArray(tokenIds) ||
+      tokenIds.length > XAI_COMPACTION_MAX_TOKENS ||
+      !tokenIds.every((tokenId) => readTokenId(tokenId) !== null)
+    ) {
+      throw new Error("xAI context token counting returned invalid token IDs");
     }
     return tokenIds.length;
   };
@@ -96,7 +102,7 @@ export function createXaiCompactionAdapter(options: {
     if (input.items.length === 0) {
       throw new Error("Cannot compact an empty xAI context");
     }
-    const response = await requestWithTimeout(
+    const payload = asRecord(await requestJsonWithTimeout(
       options.request,
       {
         body: {
@@ -109,11 +115,8 @@ export function createXaiCompactionAdapter(options: {
         path: "/responses/compact",
       },
       timeoutMs,
-      "xAI context compaction timed out",
-    );
-    await assertSuccessfulResponse(response, "xAI context compaction");
-
-    const payload = asRecord(await response.json());
+      "xAI context compaction",
+    ));
     const items = asInputItems(payload?.output);
     if (items?.length !== 1 || !readCompactionItem(items[0])) {
       throw new Error(
@@ -213,14 +216,14 @@ export function buildXaiCompactionInput(
 export function parseXaiNativeUsage(value: unknown): XaiNativeUsage | null {
   const usage = asRecord(value);
   if (!usage) return null;
-  const inputTokens = readNonNegativeSafeInteger(usage.input_tokens);
-  const outputTokens = readNonNegativeSafeInteger(usage.output_tokens);
-  const totalTokens = readNonNegativeSafeInteger(usage.total_tokens);
+  const inputTokens = readTokenCount(usage.input_tokens);
+  const outputTokens = readTokenCount(usage.output_tokens);
+  const totalTokens = readTokenCount(usage.total_tokens);
   const inputTokenDetails =
     usage.input_tokens_details === undefined
       ? null
       : asRecord(usage.input_tokens_details);
-  const cacheReadInputTokens = readOptionalNonNegativeSafeInteger(
+  const cacheReadInputTokens = readOptionalTokenCount(
     inputTokenDetails?.cached_tokens,
     0,
   );
@@ -312,45 +315,116 @@ function readCompactionItem(value: unknown): XaiResponsesInputItem | null {
     typeof item.id === "string" &&
     item.id.length > 0 &&
     typeof item.encrypted_content === "string" &&
-    item.encrypted_content.length > 0
+    item.encrypted_content.length > 0 &&
+    item.encrypted_content.length <=
+      XAI_COMPACTION_MAX_ENCRYPTED_CONTENT_CHARACTERS
     ? item
     : null;
 }
 
-async function requestWithTimeout(
+class XaiResponseLimitError extends Error {}
+
+async function requestJsonWithTimeout(
   request: XaiCompactionTransport,
   input: Omit<XaiCompactionTransportRequest, "signal">,
   timeoutMs: number,
-  timeoutMessage: string,
-): Promise<Response> {
+  operation: string,
+): Promise<unknown> {
   const controller = new AbortController();
+  const timeoutError = new Error(`${operation} timed out`);
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timeoutId = setTimeout(() => {
-      const error = new Error(timeoutMessage);
-      controller.abort(error);
-      reject(error);
+      controller.abort(timeoutError);
+      reject(timeoutError);
     }, timeoutMs);
   });
+  const readResponse = async (): Promise<unknown> => {
+    let response: Response;
+    try {
+      response = await request({ ...input, signal: controller.signal });
+    } catch {
+      if (controller.signal.aborted) throw timeoutError;
+      throw new Error(`${operation} failed`);
+    }
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
+      throw new Error(`${operation} failed (${response.status})`);
+    }
+
+    let text: string;
+    try {
+      text = await readBoundedResponseText(
+        response,
+        XAI_COMPACTION_MAX_RESPONSE_BYTES,
+        controller.signal,
+      );
+    } catch (error) {
+      if (controller.signal.aborted) throw timeoutError;
+      if (error instanceof XaiResponseLimitError) {
+        throw new Error(`${operation} response is too large`);
+      }
+      throw new Error(`${operation} failed while reading response`);
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(`${operation} returned invalid JSON`);
+    }
+  };
+
   try {
-    return await Promise.race([
-      request({ ...input, signal: controller.signal }),
-      timeout,
-    ]);
+    return await Promise.race([readResponse(), timeout]);
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
 }
 
-async function assertSuccessfulResponse(
+async function readBoundedResponseText(
   response: Response,
-  operation: string,
-): Promise<void> {
-  if (response.ok) return;
-  const detail = (await response.text().catch(() => "")).slice(0, 1_000);
-  throw new Error(
-    `${operation} failed (${response.status})${detail ? `: ${detail}` : ""}`,
-  );
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<string> {
+  if (signal.aborted) {
+    await response.body?.cancel().catch(() => {});
+    throw signal.reason;
+  }
+  const declaredLength = response.headers.get("Content-Length");
+  if (
+    declaredLength &&
+    /^\d+$/.test(declaredLength) &&
+    Number(declaredLength) > maxBytes
+  ) {
+    void response.body?.cancel().catch(() => {});
+    throw new XaiResponseLimitError();
+  }
+  if (!response.body) return "";
+
+  const reader = response.body.getReader();
+  const cancel = () => {
+    void reader.cancel().catch(() => {});
+  };
+  signal.addEventListener("abort", cancel, { once: true });
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let result = "";
+  try {
+    while (true) {
+      if (signal.aborted) throw signal.reason;
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new XaiResponseLimitError();
+      }
+      result += decoder.decode(value, { stream: true });
+    }
+    return result + decoder.decode();
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    reader.releaseLock();
+  }
 }
 
 function positiveSafeInteger(value: number, name: string): number {
@@ -375,6 +449,22 @@ function readNonNegativeSafeInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : null;
+}
+
+function readTokenCount(value: unknown): number | null {
+  const count = readNonNegativeSafeInteger(value);
+  return count !== null && count <= XAI_COMPACTION_MAX_TOKENS ? count : null;
+}
+
+function readOptionalTokenCount<T extends number>(
+  value: unknown,
+  missingValue: T,
+): number | T | null {
+  return value === undefined ? missingValue : readTokenCount(value);
+}
+
+function readTokenId(value: unknown): number | null {
+  return readNonNegativeSafeInteger(value);
 }
 
 function saturatingAdd(left: number, right: number): number {

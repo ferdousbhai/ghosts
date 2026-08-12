@@ -14,7 +14,7 @@ const exaResearchResultSchema = z
         return protocol === "https:" || protocol === "http:";
     }, "Exa result URL must use HTTP or HTTPS"),
 })
-    .passthrough();
+    .strip();
 export async function executeExaSearch(exa, query, request = {}, options = {}) {
     if (options.signal?.aborted) {
         throw options.abortMessage ? new Error(options.abortMessage) : options.signal.reason;
@@ -27,28 +27,45 @@ export async function executeExaSearch(exa, query, request = {}, options = {}) {
     if (request.max_age_hours !== undefined) {
         contents.maxAgeHours = request.max_age_hours;
     }
-    const response = await waitForSignal(exa.search(query, {
-        ...(mapExaCategory(request.category ?? "general") && {
-            category: mapExaCategory(request.category ?? "general"),
-        }),
-        ...(request.additional_queries?.length && {
-            additionalQueries: [...request.additional_queries],
-        }),
-        ...(request.from_date && { startPublishedDate: request.from_date }),
-        ...(request.to_date && { endPublishedDate: request.to_date }),
-        ...(request.include_domains?.length && {
-            includeDomains: [...request.include_domains],
-        }),
-        ...(request.exclude_domains?.length && {
-            excludeDomains: [...request.exclude_domains],
-        }),
-        ...(request.user_location && { userLocation: request.user_location }),
-        contents,
-        moderation: request.moderation ?? true,
-        numResults: request.num_results ?? 10,
-        type: request.search_type ?? "auto",
-    }), options.signal, options.abortMessage);
-    const providerResults = z.array(exaResearchResultSchema).max(1_000).parse(response.results);
+    let response;
+    try {
+        response = await exa.search(query, {
+            ...(mapExaCategory(request.category ?? "general") && {
+                category: mapExaCategory(request.category ?? "general"),
+            }),
+            ...(request.additional_queries?.length && {
+                additionalQueries: [...request.additional_queries],
+            }),
+            ...(request.from_date && { startPublishedDate: request.from_date }),
+            ...(request.to_date && { endPublishedDate: request.to_date }),
+            ...(request.include_domains?.length && {
+                includeDomains: [...request.include_domains],
+            }),
+            ...(request.exclude_domains?.length && {
+                excludeDomains: [...request.exclude_domains],
+            }),
+            ...(request.user_location && { userLocation: request.user_location }),
+            contents,
+            moderation: request.moderation ?? true,
+            numResults: request.num_results ?? 10,
+            type: request.search_type ?? "auto",
+        }, { signal: options.signal });
+    }
+    catch {
+        if (options.signal?.aborted) {
+            throw options.abortMessage
+                ? new Error(options.abortMessage)
+                : options.signal.reason;
+        }
+        throw new Error("Exa research failed");
+    }
+    let providerResults;
+    try {
+        providerResults = z.array(exaResearchResultSchema).max(1_000).parse(response.results);
+    }
+    catch {
+        throw new Error("Exa research returned invalid results");
+    }
     return {
         providerResultCount: providerResults.length,
         results: providerResults
@@ -69,18 +86,4 @@ export function mapExaCategory(category) {
     if (category === "financial_report")
         return "financial report";
     return category;
-}
-async function waitForSignal(promise, signal, abortMessage) {
-    if (!signal)
-        return promise;
-    if (signal.aborted) {
-        throw abortMessage ? new Error(abortMessage) : signal.reason;
-    }
-    return await new Promise((resolve, reject) => {
-        const onAbort = () => reject(abortMessage ? new Error(abortMessage) : signal.reason);
-        signal.addEventListener("abort", onAbort, { once: true });
-        promise
-            .then(resolve, reject)
-            .finally(() => signal.removeEventListener("abort", onAbort));
-    });
 }

@@ -17,6 +17,7 @@ const piTool = adaptPiTool({
   mapUpdate?,
   mapResult?,
   resultMetadata?,
+  trustExecutorResults?,
   onError?,
   constrainedSampling?,
   executionMode?,
@@ -31,7 +32,7 @@ const piTool = adaptPiTool({
 3. checks cancellation again and installs the optional execution timeout signal;
 4. runs the product executor;
 5. checks cancellation after execution;
-6. preserves or maps the result and applies optional Pi metadata.
+6. wraps executor output as data by default, then maps the result and applies optional Pi metadata.
 
 The package also exports:
 
@@ -39,7 +40,7 @@ The package also exports:
 - `validateToolArguments(schema, input, options?)`
 - `stringifyToolResult(value)`
 - `isPiToolResult(value)`
-- `toPiToolResult(value)`
+- `toPiToolResult(value, { trustPiResult? })`
 - structural protocol and hook types
 - `ToolSchemaError`, `ToolInputValidationError`, and `ToolTimeoutError`
 
@@ -103,9 +104,10 @@ All hooks are mechanisms; the host supplies policy.
 
 - **Labels:** `label` is a string or resolver. Empty labels fail at adaptation time.
 - **Timeout:** `timeoutMs` is a number or per-call resolver. It starts after validation and creates a cooperative execution abort signal. `createTimeoutError` maps expiry to a product error; otherwise `ToolTimeoutError` is used. There is no default timeout.
-- **Updates:** raw executor updates are normalized to Pi results. `mapUpdate` can bound or reshape each update before Pi receives it.
-- **Bounding and pagination:** `mapResult(defaultResult, context)` can invoke a host result boundary/store and return bounded text plus opaque pagination details. There are no package-selected size or retention limits.
-- **Terminal/dynamic-tool metadata:** `resultMetadata(context)` supplies Pi's `terminate` and `addedToolNames` fields. `addedToolNames` declares names already introduced by the host; it does not register tools or change Pi's active tool set. Product-specific registration and marker names stay outside this package.
+- **Updates:** executor updates are wrapped as data by default. `mapUpdate` is a trusted host hook that can bound or explicitly reshape each update into a Pi result before Pi receives it.
+- **Bounding and pagination:** `mapResult(defaultResult, context)` is a trusted host hook that can invoke a result boundary/store and return bounded text plus opaque pagination details. There are no package-selected size or retention limits.
+- **Terminal/dynamic-tool metadata:** `resultMetadata(context)` is a trusted host hook that supplies Pi's `terminate` and `addedToolNames` fields. `addedToolNames` declares names already introduced by the host; it does not register tools or change Pi's active tool set. Product-specific registration and marker names stay outside this package.
+- **Trusted executor Pi results:** `trustExecutorResults: true` preserves valid pre-shaped Pi results emitted as either final output or updates, including their control metadata. Leave it unset unless every executor behind the adapter is trusted to control Pi. Prefer the narrower mapping and metadata hooks when possible.
 - **Telemetry:** `onError` receives `{ name, toolCallId, phase, error, aborted, timedOut, durationMs }`. It intentionally receives no arguments or output. Telemetry failures are suppressed so they cannot replace the original tool error.
 - **Pi pass-through:** `executionMode` and `constrainedSampling` are emitted structurally.
 
@@ -142,8 +144,8 @@ const piTool = adaptPiTool({
 - **summon-ghost:** use `label` for titles, adapt AI SDK `toModelOutput` inside `mapResult`, call the existing `ToolResultBoundary` there, and retain original errors in `onError`.
 - **ghost-build:** set `label` from the builder label map, resolve `timeoutMs` from builder budgets, map expiry with `createTimeoutError`, and forward canonical progress through the default `onUpdate` bridge or `mapUpdate`.
 
-Valid already-shaped Pi results are returned by identity when no result or metadata hook changes them. The shape check validates every text/image content item plus optional usage and metadata fields; malformed result-like values are treated as ordinary values. Ordinary results use deterministic stringification: strings pass through, JSON-serializable values use compact JSON, then `String(value)`, then a fixed unreadable fallback.
+Executor results and updates are always treated as ordinary data unless `trustExecutorResults` is true or a trusted mapping hook explicitly returns a Pi result. Likewise, `toPiToolResult` wraps values as data unless `{ trustPiResult: true }` is passed. Trusted valid Pi results are preserved by identity; the shape check validates every text/image content item plus optional usage and metadata fields. Malformed result-like values remain ordinary data. Data uses deterministic stringification: strings pass through, JSON-serializable values use compact JSON, then `String(value)`, then a fixed unreadable fallback.
 
 ## Compatibility and security
 
-The package is dependency-free and contains no agent-loop, authorization, persistence, timeout duration, result size, pagination retention, terminal-marker, or telemetry transport policy. Hosts remain responsible for authorization, tenant isolation, side-effect idempotency, complete structural JSON Schema validation, durable pagination storage, and deciding which tool failures are safe to expose to a model.
+The package is dependency-free and contains no agent-loop, authorization, persistence, timeout duration, result size, pagination retention, terminal-marker, or telemetry transport policy. Executor-controlled objects that happen to match Pi's result shape cannot set `terminate`, declare added tools, inject usage, or bypass default data rendering unless the host explicitly enables trusted passthrough or does so in a trusted hook. Hosts remain responsible for authorization, tenant isolation, side-effect idempotency, complete structural JSON Schema validation, durable pagination storage, and deciding which tool failures are safe to expose to a model.

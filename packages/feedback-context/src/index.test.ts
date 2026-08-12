@@ -23,6 +23,43 @@ describe("@summonghost/feedback-context", () => {
         { value: "x".repeat(33) },
       ]),
     ).toBe('<feedback by="A &quot;B&quot;">&lt;&amp;</feedback>');
+    expect(renderFeedbackContext([{ value: "👍".repeat(32) }])).not.toBeNull();
+    expect(renderFeedbackContext([{ value: "👍".repeat(33) }])).toBeNull();
+    expect(
+      renderFeedbackContext([{ value: `${" ".repeat(33)}👍` }]),
+    ).toBeNull();
+  });
+
+  it("inspects at most 16 reaction candidates without expanding the array", () => {
+    const reactions = Array.from({ length: 17 }, () => ({ value: "👍" }));
+    Object.defineProperty(reactions, 16, {
+      get: () => {
+        throw new Error("reaction candidate limit exceeded");
+      },
+    });
+
+    expect(renderFeedbackContext(reactions)).toBe("<feedback>👍</feedback>");
+
+    const overflow = [{ value: "🔥" }];
+    Object.defineProperty(overflow, 0, {
+      get: () => {
+        throw new Error("merged reaction candidate limit exceeded");
+      },
+    });
+    expect(
+      decorateAssistantMessageFeedback(
+        [{ role: "assistant", content: "Answer" }],
+        [
+          { messageIndex: 0, reactions: reactions.slice(0, 16) },
+          { messageIndex: 0, reactions: overflow },
+        ],
+      ),
+    ).toEqual([
+      {
+        role: "assistant",
+        content: "Answer\n\n<feedback>👍</feedback>",
+      },
+    ]);
   });
 
   it("decorates only the exact assistant message without mutation", () => {

@@ -16,7 +16,7 @@ const exaResearchResultSchema = z
       return protocol === "https:" || protocol === "http:";
     }, "Exa result URL must use HTTP or HTTPS"),
   })
-  .passthrough();
+  .strip();
 
 export type ExaSearchRequest = Readonly<{
   additional_queries?: readonly string[];
@@ -49,11 +49,16 @@ export type ExecuteExaSearchOptions = Readonly<{
 
 export type ExaSearchOptions = Readonly<Record<string, unknown>>;
 
-/** Structural Exa client contract; no exa-js version is required. */
+export type ExaSearchCallOptions = Readonly<{
+  signal?: AbortSignal;
+}>;
+
+/** Structural Exa client contract; implementations must forward the signal to their transport. */
 export type ExaSearchClient = Readonly<{
   search: (
     query: string,
     options: ExaSearchOptions,
+    callOptions: ExaSearchCallOptions,
   ) => Promise<Readonly<{ results: readonly unknown[] }>>;
 }>;
 
@@ -76,8 +81,9 @@ export async function executeExaSearch(
     contents.maxAgeHours = request.max_age_hours;
   }
 
-  const response = await waitForSignal(
-    exa.search(query, {
+  let response: Readonly<{ results: readonly unknown[] }>;
+  try {
+    response = await exa.search(query, {
       ...(mapExaCategory(request.category ?? "general") && {
         category: mapExaCategory(request.category ?? "general"),
       }),
@@ -97,12 +103,22 @@ export async function executeExaSearch(
       moderation: request.moderation ?? true,
       numResults: request.num_results ?? 10,
       type: request.search_type ?? "auto",
-    }),
-    options.signal,
-    options.abortMessage,
-  );
+    }, { signal: options.signal });
+  } catch {
+    if (options.signal?.aborted) {
+      throw options.abortMessage
+        ? new Error(options.abortMessage)
+        : options.signal.reason;
+    }
+    throw new Error("Exa research failed");
+  }
 
-  const providerResults = z.array(exaResearchResultSchema).max(1_000).parse(response.results);
+  let providerResults: readonly z.infer<typeof exaResearchResultSchema>[];
+  try {
+    providerResults = z.array(exaResearchResultSchema).max(1_000).parse(response.results);
+  } catch {
+    throw new Error("Exa research returned invalid results");
+  }
   return {
     providerResultCount: providerResults.length,
     results: providerResults
@@ -120,23 +136,4 @@ export function mapExaCategory(category: string): string | undefined {
   if (category === "personal_site") return "personal site";
   if (category === "financial_report") return "financial report";
   return category;
-}
-
-async function waitForSignal<T>(
-  promise: Promise<T>,
-  signal?: AbortSignal,
-  abortMessage?: string,
-): Promise<T> {
-  if (!signal) return promise;
-  if (signal.aborted) {
-    throw abortMessage ? new Error(abortMessage) : signal.reason;
-  }
-  return await new Promise<T>((resolve, reject) => {
-    const onAbort = () =>
-      reject(abortMessage ? new Error(abortMessage) : signal.reason);
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise
-      .then(resolve, reject)
-      .finally(() => signal.removeEventListener("abort", onAbort));
-  });
 }
