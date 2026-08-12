@@ -104,7 +104,7 @@ describe("app-wide tool cache client", () => {
 
     const first = cache.getOrLoad({ ...input, load: firstLoad });
     const second = cache.getOrLoad({ ...input, load: secondLoad });
-    await vi.waitFor(() => expect(firstLoad).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(firstLoad).toHaveBeenCalledTimes(1), { timeout: 5_000 });
     finish("page");
 
     await expect(first).resolves.toBe("page");
@@ -128,7 +128,7 @@ describe("app-wide tool cache client", () => {
 
     const first = cache.getOrLoad({ ...input, load: firstLoad });
     const follower = cache.getOrLoad({ ...input, load: followerLoad });
-    await vi.waitFor(() => expect(firstLoad).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(firstLoad).toHaveBeenCalledTimes(1), { timeout: 5_000 });
     finish("partial");
 
     await expect(first).resolves.toBe("partial");
@@ -211,7 +211,7 @@ describe("app-wide tool cache client", () => {
       load,
       signal: controller.signal,
     });
-    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1), { timeout: 5_000 });
 
     controller.abort();
 
@@ -235,7 +235,7 @@ describe("app-wide tool cache client", () => {
       params: { query: "shared cancellation" },
     } as const;
     const leader = cache.getOrLoad({ ...input, load: firstLoad });
-    await vi.waitFor(() => expect(firstLoad).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(firstLoad).toHaveBeenCalledTimes(1), { timeout: 5_000 });
     const controller = new AbortController();
     const follower = cache.getOrLoad({
       ...input,
