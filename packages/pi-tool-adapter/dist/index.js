@@ -97,21 +97,27 @@ export function stringifyToolResult(value) {
     }
 }
 export function isPiToolResult(value) {
-    if (!isObject(value) || !Array.isArray(value.content) || !("details" in value)) {
+    if (!isObject(value) ||
+        !Array.isArray(value.content) ||
+        !("details" in value)) {
         return false;
     }
     if (!Array.from(value.content).every(isPiToolContent))
         return false;
-    if ("terminate" in value && value.terminate !== undefined && typeof value.terminate !== "boolean") {
+    if ("terminate" in value &&
+        value.terminate !== undefined &&
+        typeof value.terminate !== "boolean") {
         return false;
     }
-    if ("addedToolNames" in value
-        && value.addedToolNames !== undefined
-        && (!Array.isArray(value.addedToolNames)
-            || !Array.from(value.addedToolNames).every((name) => typeof name === "string"))) {
+    if ("addedToolNames" in value &&
+        value.addedToolNames !== undefined &&
+        (!Array.isArray(value.addedToolNames) ||
+            !Array.from(value.addedToolNames).every((name) => typeof name === "string"))) {
         return false;
     }
-    return !("usage" in value) || value.usage === undefined || isPiToolUsage(value.usage);
+    return (!("usage" in value) ||
+        value.usage === undefined ||
+        isPiToolUsage(value.usage));
 }
 /** Wrap a value as data, unless trusted Pi-result passthrough is explicit. */
 export function toPiToolResult(value, options = {}) {
@@ -149,7 +155,11 @@ export function adaptPiTool(options) {
             try {
                 throwIfAborted(signal);
                 const validation = options.validateArguments
-                    ? options.validateArguments(rawInput, { name, parameters, toolCallId })
+                    ? options.validateArguments(rawInput, {
+                        name,
+                        parameters,
+                        toolCallId,
+                    })
                     : validateToolArguments(definition.inputSchema, rawInput, {
                         name,
                         toolCallId,
@@ -168,8 +178,9 @@ export function adaptPiTool(options) {
                         const context = { ...invocation, timeoutMs };
                         let reason;
                         try {
-                            reason = options.createTimeoutError?.(context)
-                                ?? new ToolTimeoutError(name, timeoutMs);
+                            reason =
+                                options.createTimeoutError?.(context) ??
+                                    new ToolTimeoutError(name, timeoutMs);
                         }
                         catch (error) {
                             reason = error;
@@ -250,7 +261,9 @@ export function adaptPiTool(options) {
             catch (caught) {
                 const aborted = abortSource !== undefined || executionSignal?.aborted === true;
                 const timedOut = abortSource === "timeout";
-                const error = aborted && executionSignal?.aborted
+                const error = aborted &&
+                    executionSignal?.aborted &&
+                    !options.preferCaughtErrorOverAbort?.(caught)
                     ? abortReason(executionSignal)
                     : caught;
                 await reportError(options.onError, {
@@ -281,18 +294,18 @@ export function adaptPiTool(options) {
 function isZodSchema(value) {
     if (!isObject(value))
         return false;
-    return typeof value.safeParseAsync === "function"
-        && typeof value.toJSONSchema === "function"
-        && ("_zod" in value || "_def" in value);
+    return (typeof value.safeParseAsync === "function" &&
+        typeof value.toJSONSchema === "function" &&
+        ("_zod" in value || "_def" in value));
 }
 function isStandardSchema(value) {
     if (!isObject(value) || !("~standard" in value))
         return false;
     const standard = value["~standard"];
-    return isObject(standard)
-        && standard.version === 1
-        && typeof standard.vendor === "string"
-        && typeof standard.validate === "function";
+    return (isObject(standard) &&
+        standard.version === 1 &&
+        typeof standard.vendor === "string" &&
+        typeof standard.validate === "function");
 }
 function unwrapStructuralSchema(schema) {
     if (!isObject(schema))
@@ -309,7 +322,8 @@ function normalizeDraft07Object(value) {
         throw new ToolSchemaError("Tool input schema must convert to a JSON Schema object");
     }
     if ("$schema" in value && value.$schema !== undefined) {
-        if (typeof value.$schema !== "string" || !isDraft07Identifier(value.$schema)) {
+        if (typeof value.$schema !== "string" ||
+            !isDraft07Identifier(value.$schema)) {
             throw new ToolSchemaError(`Structural tool schema declares unsupported draft: ${String(value.$schema)}`);
         }
         return value;
@@ -322,7 +336,7 @@ function isDraft07Identifier(value) {
 function resolveLabel(options) {
     const label = typeof options.label === "function"
         ? options.label({ definition: options.definition, name: options.name })
-        : options.label ?? options.name;
+        : (options.label ?? options.name);
     const trimmed = label.trim();
     if (!trimmed)
         throw new TypeError("Pi tool label must not be empty");
@@ -332,7 +346,9 @@ function resolveTimeout(timeout, context) {
     const value = typeof timeout === "function" ? timeout(context) : timeout;
     if (value === undefined)
         return undefined;
-    if (!Number.isSafeInteger(value) || value < 0 || value > MAX_TIMER_MILLISECONDS) {
+    if (!Number.isSafeInteger(value) ||
+        value < 0 ||
+        value > MAX_TIMER_MILLISECONDS) {
         throw new RangeError(`Tool timeout must be an integer from 0 to ${MAX_TIMER_MILLISECONDS} milliseconds`);
     }
     return value;
@@ -348,20 +364,23 @@ function abortReason(signal) {
     return new DOMException("Tool execution was aborted", "AbortError");
 }
 function applyMetadata(result, metadata) {
-    if (metadata.terminate !== undefined && typeof metadata.terminate !== "boolean") {
+    if (metadata.terminate !== undefined &&
+        typeof metadata.terminate !== "boolean") {
         throw new TypeError("resultMetadata.terminate must be a boolean");
     }
     let addedToolNames;
     if (metadata.addedToolNames !== undefined) {
-        if (!Array.isArray(metadata.addedToolNames)
-            || !Array.from(metadata.addedToolNames).every((name) => typeof name === "string")) {
+        if (!Array.isArray(metadata.addedToolNames) ||
+            !Array.from(metadata.addedToolNames).every((name) => typeof name === "string")) {
             throw new TypeError("resultMetadata.addedToolNames must contain only strings");
         }
         addedToolNames = [...metadata.addedToolNames];
     }
     return {
         ...result,
-        ...(metadata.terminate === undefined ? {} : { terminate: metadata.terminate }),
+        ...(metadata.terminate === undefined
+            ? {}
+            : { terminate: metadata.terminate }),
         ...(addedToolNames === undefined ? {} : { addedToolNames }),
     };
 }
@@ -369,18 +388,19 @@ function isPiToolContent(value) {
     if (!isObject(value) || typeof value.type !== "string")
         return false;
     if (value.type === "text") {
-        return typeof value.text === "string"
-            && (!("textSignature" in value) || value.textSignature === undefined
-                || typeof value.textSignature === "string");
+        return (typeof value.text === "string" &&
+            (!("textSignature" in value) ||
+                value.textSignature === undefined ||
+                typeof value.textSignature === "string"));
     }
-    return value.type === "image"
-        && typeof value.data === "string"
-        && typeof value.mimeType === "string";
+    return (value.type === "image" &&
+        typeof value.data === "string" &&
+        typeof value.mimeType === "string");
 }
 function isPiToolUsage(value) {
     if (!isObject(value) || !isObject(value.cost))
         return false;
-    return [
+    return ([
         value.input,
         value.output,
         value.cacheRead,
@@ -391,11 +411,13 @@ function isPiToolUsage(value) {
         value.cost.cacheRead,
         value.cost.cacheWrite,
         value.cost.total,
-    ].every((entry) => typeof entry === "number" && Number.isFinite(entry))
-        && (!("cacheWrite1h" in value) || value.cacheWrite1h === undefined
-            || typeof value.cacheWrite1h === "number")
-        && (!("reasoning" in value) || value.reasoning === undefined
-            || typeof value.reasoning === "number");
+    ].every((entry) => typeof entry === "number" && Number.isFinite(entry)) &&
+        (!("cacheWrite1h" in value) ||
+            value.cacheWrite1h === undefined ||
+            typeof value.cacheWrite1h === "number") &&
+        (!("reasoning" in value) ||
+            value.reasoning === undefined ||
+            typeof value.reasoning === "number"));
 }
 function assertPiToolResult(value, hook) {
     if (!isPiToolResult(value)) {
@@ -429,7 +451,9 @@ async function reportError(reporter, event) {
     }
 }
 function formatIssues(issues) {
-    return issues.map((issue) => issue.message?.trim() || "Invalid input").join("; ");
+    return issues
+        .map((issue) => issue.message?.trim() || "Invalid input")
+        .join("; ");
 }
 function errorMessage(error) {
     if (error instanceof Error && error.message)

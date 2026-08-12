@@ -37,13 +37,16 @@ export type PiToolUsage = Readonly<{
   }>;
 }>;
 
-export type PiConstrainedSampling = false | Readonly<{
-  type: "json_schema";
-  strict: "prefer" | "require";
-}> | Readonly<{
-  type: "grammar";
-  variants: Partial<Record<"openai_lark" | "openai_regex", string>>;
-}>;
+export type PiConstrainedSampling =
+  | false
+  | Readonly<{
+      type: "json_schema";
+      strict: "prefer" | "require";
+    }>
+  | Readonly<{
+      type: "grammar";
+      variants: Partial<Record<"openai_lark" | "openai_regex", string>>;
+    }>;
 
 /** Structural counterpart of Pi's AgentToolResult. */
 export interface PiToolResult<TDetails = unknown> {
@@ -96,15 +99,19 @@ export interface StandardSchemaV1<T = unknown> {
 
 export interface ZodSchemaLike<T = unknown> {
   readonly _zod?: unknown;
-  safeParseAsync(value: unknown): Promise<
+  safeParseAsync(
+    value: unknown,
+  ): Promise<
     | Readonly<{ success: true; data: T }>
     | Readonly<{ success: false; error: unknown }>
   >;
-  toJSONSchema(options: Readonly<{
-    io: "input";
-    target: "draft-07";
-    unrepresentable: "any" | "throw";
-  }>): unknown;
+  toJSONSchema(
+    options: Readonly<{
+      io: "input";
+      target: "draft-07";
+      unrepresentable: "any" | "throw";
+    }>,
+  ): unknown;
 }
 
 export type ToolInputSchema =
@@ -136,15 +143,19 @@ export type ToolInvocationContext<TInput = unknown> = Readonly<{
   toolCallId: string;
 }>;
 
-export type ToolResultContext<TInput = unknown, TOutput = unknown> =
-  ToolInvocationContext<TInput> & Readonly<{
+export type ToolResultContext<
+  TInput = unknown,
+  TOutput = unknown,
+> = ToolInvocationContext<TInput> &
+  Readonly<{
     output: TOutput;
   }>;
 
 export type ToolUpdateContext<TInput = unknown> =
-  ToolInvocationContext<TInput> & Readonly<{
-    update: unknown;
-  }>;
+  ToolInvocationContext<TInput> &
+    Readonly<{
+      update: unknown;
+    }>;
 
 export type ToolResultMetadata = Readonly<{
   addedToolNames?: readonly string[];
@@ -177,20 +188,31 @@ export type StructuralArgumentValidator<TInput> = (
   }>,
 ) => Awaitable<TInput>;
 
-export type AdaptPiToolOptions<TInput = unknown, TOutput = unknown, TDetails = unknown> = Readonly<{
+export type AdaptPiToolOptions<
+  TInput = unknown,
+  TOutput = unknown,
+  TDetails = unknown,
+> = Readonly<{
   name: string;
   definition: ToolDefinition<TInput, TOutput>;
-  label?: string | ((context: Readonly<{
-    definition: ToolDefinition<TInput, TOutput>;
-    name: string;
-  }>) => string);
+  label?:
+    | string
+    | ((
+        context: Readonly<{
+          definition: ToolDefinition<TInput, TOutput>;
+          name: string;
+        }>,
+      ) => string);
   /** Required for structural JSON Schema; optional override for Zod/Standard Schema. */
   validateArguments?: StructuralArgumentValidator<TInput>;
   /** Product-selected timeout. The adapter supplies only the timer/abort mechanism. */
-  timeoutMs?: number | ((context: ToolInvocationContext<TInput>) => number | undefined);
+  timeoutMs?:
+    number | ((context: ToolInvocationContext<TInput>) => number | undefined);
   createTimeoutError?: (
     context: ToolInvocationContext<TInput> & Readonly<{ timeoutMs: number }>,
   ) => unknown;
+  /** Preserve safety-critical executor failures discovered while abort cleanup settles. */
+  preferCaughtErrorOverAbort?: (error: unknown) => boolean;
   mapUpdate?: (
     defaultResult: PiToolResult<unknown>,
     context: ToolUpdateContext<TInput>,
@@ -287,7 +309,11 @@ export async function validateToolArguments<TInput = unknown>(
   if (isZodSchema(schema)) {
     const result = await schema.safeParseAsync(input);
     if (result.success) return result.data as TInput;
-    throw new ToolInputValidationError(name, errorMessage(result.error), result.error);
+    throw new ToolInputValidationError(
+      name,
+      errorMessage(result.error),
+      result.error,
+    );
   }
   if (isStandardSchema(schema)) {
     let result: StandardSchemaResult<unknown>;
@@ -324,24 +350,36 @@ export function stringifyToolResult(value: unknown): string {
 }
 
 export function isPiToolResult(value: unknown): value is PiToolResult<unknown> {
-  if (!isObject(value) || !Array.isArray(value.content) || !("details" in value)) {
-    return false;
-  }
-  if (!Array.from(value.content).every(isPiToolContent)) return false;
-  if ("terminate" in value && value.terminate !== undefined && typeof value.terminate !== "boolean") {
-    return false;
-  }
   if (
-    "addedToolNames" in value
-    && value.addedToolNames !== undefined
-    && (
-      !Array.isArray(value.addedToolNames)
-      || !Array.from(value.addedToolNames).every((name) => typeof name === "string")
-    )
+    !isObject(value) ||
+    !Array.isArray(value.content) ||
+    !("details" in value)
   ) {
     return false;
   }
-  return !("usage" in value) || value.usage === undefined || isPiToolUsage(value.usage);
+  if (!Array.from(value.content).every(isPiToolContent)) return false;
+  if (
+    "terminate" in value &&
+    value.terminate !== undefined &&
+    typeof value.terminate !== "boolean"
+  ) {
+    return false;
+  }
+  if (
+    "addedToolNames" in value &&
+    value.addedToolNames !== undefined &&
+    (!Array.isArray(value.addedToolNames) ||
+      !Array.from(value.addedToolNames).every(
+        (name) => typeof name === "string",
+      ))
+  ) {
+    return false;
+  }
+  return (
+    !("usage" in value) ||
+    value.usage === undefined ||
+    isPiToolUsage(value.usage)
+  );
 }
 
 /** Wrap a value as data, unless trusted Pi-result passthrough is explicit. */
@@ -359,7 +397,11 @@ export function toPiToolResult<TDetails = unknown>(
 }
 
 /** Adapt one product tool to the current structural Pi AgentTool contract. */
-export function adaptPiTool<TInput = unknown, TOutput = unknown, TDetails = unknown>(
+export function adaptPiTool<
+  TInput = unknown,
+  TOutput = unknown,
+  TDetails = unknown,
+>(
   options: AdaptPiToolOptions<TInput, TOutput, TDetails>,
 ): PiAgentTool<TDetails> {
   const { definition, name } = options;
@@ -386,7 +428,11 @@ export function adaptPiTool<TInput = unknown, TOutput = unknown, TDetails = unkn
       try {
         throwIfAborted(signal);
         const validation = options.validateArguments
-          ? options.validateArguments(rawInput, { name, parameters, toolCallId })
+          ? options.validateArguments(rawInput, {
+              name,
+              parameters,
+              toolCallId,
+            })
           : validateToolArguments<TInput>(definition.inputSchema, rawInput, {
               name,
               toolCallId,
@@ -404,8 +450,9 @@ export function adaptPiTool<TInput = unknown, TOutput = unknown, TDetails = unkn
             const context = { ...invocation, timeoutMs };
             let reason: unknown;
             try {
-              reason = options.createTimeoutError?.(context)
-                ?? new ToolTimeoutError(name, timeoutMs);
+              reason =
+                options.createTimeoutError?.(context) ??
+                new ToolTimeoutError(name, timeoutMs);
             } catch (error) {
               reason = error;
             }
@@ -434,13 +481,14 @@ export function adaptPiTool<TInput = unknown, TOutput = unknown, TDetails = unkn
                     const defaultResult = toPiToolResult(update, {
                       trustPiResult: options.trustExecutorResults,
                     });
-                    const mapped = options.mapUpdate?.(defaultResult, {
-                      input,
-                      name,
-                      signal: executionSignal,
-                      toolCallId,
-                      update,
-                    }) ?? defaultResult;
+                    const mapped =
+                      options.mapUpdate?.(defaultResult, {
+                        input,
+                        name,
+                        signal: executionSignal,
+                        toolCallId,
+                        update,
+                      }) ?? defaultResult;
                     assertPiToolResult(mapped, "mapUpdate");
                     throwIfAborted(executionSignal);
                     onUpdate(mapped as PiToolResult<TDetails>);
@@ -470,7 +518,7 @@ export function adaptPiTool<TInput = unknown, TOutput = unknown, TDetails = unkn
         });
         let result = options.mapResult
           ? await options.mapResult(defaultResult, context)
-          : defaultResult as PiToolResult<TDetails>;
+          : (defaultResult as PiToolResult<TDetails>);
         assertPiToolResult(result, "mapResult");
         throwIfAborted(executionSignal);
         const metadata = await options.resultMetadata?.(context);
@@ -478,11 +526,15 @@ export function adaptPiTool<TInput = unknown, TOutput = unknown, TDetails = unkn
         throwIfAborted(executionSignal);
         return result;
       } catch (caught) {
-        const aborted = abortSource !== undefined || executionSignal?.aborted === true;
+        const aborted =
+          abortSource !== undefined || executionSignal?.aborted === true;
         const timedOut = abortSource === "timeout";
-        const error = aborted && executionSignal?.aborted
-          ? abortReason(executionSignal)
-          : caught;
+        const error =
+          aborted &&
+          executionSignal?.aborted &&
+          !options.preferCaughtErrorOverAbort?.(caught)
+            ? abortReason(executionSignal)
+            : caught;
         await reportError(options.onError, {
           aborted,
           durationMs: Date.now() - startedAt,
@@ -502,24 +554,29 @@ export function adaptPiTool<TInput = unknown, TOutput = unknown, TDetails = unkn
   if (options.constrainedSampling !== undefined) {
     tool.constrainedSampling = options.constrainedSampling;
   }
-  if (options.executionMode !== undefined) tool.executionMode = options.executionMode;
+  if (options.executionMode !== undefined)
+    tool.executionMode = options.executionMode;
   return tool;
 }
 
 function isZodSchema(value: unknown): value is ZodSchemaLike<unknown> {
   if (!isObject(value)) return false;
-  return typeof value.safeParseAsync === "function"
-    && typeof value.toJSONSchema === "function"
-    && ("_zod" in value || "_def" in value);
+  return (
+    typeof value.safeParseAsync === "function" &&
+    typeof value.toJSONSchema === "function" &&
+    ("_zod" in value || "_def" in value)
+  );
 }
 
 function isStandardSchema(value: unknown): value is StandardSchemaV1<unknown> {
   if (!isObject(value) || !("~standard" in value)) return false;
   const standard = value["~standard"];
-  return isObject(standard)
-    && standard.version === 1
-    && typeof standard.vendor === "string"
-    && typeof standard.validate === "function";
+  return (
+    isObject(standard) &&
+    standard.version === 1 &&
+    typeof standard.vendor === "string" &&
+    typeof standard.validate === "function"
+  );
 }
 
 function unwrapStructuralSchema(schema: ToolInputSchema): unknown {
@@ -532,10 +589,15 @@ function unwrapStructuralSchema(schema: ToolInputSchema): unknown {
 
 function normalizeDraft07Object(value: unknown): Draft07JsonSchema {
   if (!isObject(value) || typeof value.then === "function") {
-    throw new ToolSchemaError("Tool input schema must convert to a JSON Schema object");
+    throw new ToolSchemaError(
+      "Tool input schema must convert to a JSON Schema object",
+    );
   }
   if ("$schema" in value && value.$schema !== undefined) {
-    if (typeof value.$schema !== "string" || !isDraft07Identifier(value.$schema)) {
+    if (
+      typeof value.$schema !== "string" ||
+      !isDraft07Identifier(value.$schema)
+    ) {
       throw new ToolSchemaError(
         `Structural tool schema declares unsupported draft: ${String(value.$schema)}`,
       );
@@ -552,9 +614,10 @@ function isDraft07Identifier(value: string): boolean {
 function resolveLabel<TInput, TOutput, TDetails>(
   options: AdaptPiToolOptions<TInput, TOutput, TDetails>,
 ): string {
-  const label = typeof options.label === "function"
-    ? options.label({ definition: options.definition, name: options.name })
-    : options.label ?? options.name;
+  const label =
+    typeof options.label === "function"
+      ? options.label({ definition: options.definition, name: options.name })
+      : (options.label ?? options.name);
   const trimmed = label.trim();
   if (!trimmed) throw new TypeError("Pi tool label must not be empty");
   return trimmed;
@@ -566,7 +629,11 @@ function resolveTimeout<TInput>(
 ): number | undefined {
   const value = typeof timeout === "function" ? timeout(context) : timeout;
   if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || value < 0 || value > MAX_TIMER_MILLISECONDS) {
+  if (
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value > MAX_TIMER_MILLISECONDS
+  ) {
     throw new RangeError(
       `Tool timeout must be an integer from 0 to ${MAX_TIMER_MILLISECONDS} milliseconds`,
     );
@@ -588,22 +655,31 @@ function applyMetadata<TDetails>(
   result: PiToolResult<TDetails>,
   metadata: ToolResultMetadata,
 ): PiToolResult<TDetails> {
-  if (metadata.terminate !== undefined && typeof metadata.terminate !== "boolean") {
+  if (
+    metadata.terminate !== undefined &&
+    typeof metadata.terminate !== "boolean"
+  ) {
     throw new TypeError("resultMetadata.terminate must be a boolean");
   }
   let addedToolNames: string[] | undefined;
   if (metadata.addedToolNames !== undefined) {
     if (
-      !Array.isArray(metadata.addedToolNames)
-      || !Array.from(metadata.addedToolNames).every((name) => typeof name === "string")
+      !Array.isArray(metadata.addedToolNames) ||
+      !Array.from(metadata.addedToolNames).every(
+        (name) => typeof name === "string",
+      )
     ) {
-      throw new TypeError("resultMetadata.addedToolNames must contain only strings");
+      throw new TypeError(
+        "resultMetadata.addedToolNames must contain only strings",
+      );
     }
     addedToolNames = [...metadata.addedToolNames];
   }
   return {
     ...result,
-    ...(metadata.terminate === undefined ? {} : { terminate: metadata.terminate }),
+    ...(metadata.terminate === undefined
+      ? {}
+      : { terminate: metadata.terminate }),
     ...(addedToolNames === undefined ? {} : { addedToolNames }),
   };
 }
@@ -611,42 +687,57 @@ function applyMetadata<TDetails>(
 function isPiToolContent(value: unknown): value is PiToolContent {
   if (!isObject(value) || typeof value.type !== "string") return false;
   if (value.type === "text") {
-    return typeof value.text === "string"
-      && (!("textSignature" in value) || value.textSignature === undefined
-        || typeof value.textSignature === "string");
+    return (
+      typeof value.text === "string" &&
+      (!("textSignature" in value) ||
+        value.textSignature === undefined ||
+        typeof value.textSignature === "string")
+    );
   }
-  return value.type === "image"
-    && typeof value.data === "string"
-    && typeof value.mimeType === "string";
+  return (
+    value.type === "image" &&
+    typeof value.data === "string" &&
+    typeof value.mimeType === "string"
+  );
 }
 
 function isPiToolUsage(value: unknown): value is PiToolUsage {
   if (!isObject(value) || !isObject(value.cost)) return false;
-  return [
-    value.input,
-    value.output,
-    value.cacheRead,
-    value.cacheWrite,
-    value.totalTokens,
-    value.cost.input,
-    value.cost.output,
-    value.cost.cacheRead,
-    value.cost.cacheWrite,
-    value.cost.total,
-  ].every((entry) => typeof entry === "number" && Number.isFinite(entry))
-    && (!("cacheWrite1h" in value) || value.cacheWrite1h === undefined
-      || typeof value.cacheWrite1h === "number")
-    && (!("reasoning" in value) || value.reasoning === undefined
-      || typeof value.reasoning === "number");
+  return (
+    [
+      value.input,
+      value.output,
+      value.cacheRead,
+      value.cacheWrite,
+      value.totalTokens,
+      value.cost.input,
+      value.cost.output,
+      value.cost.cacheRead,
+      value.cost.cacheWrite,
+      value.cost.total,
+    ].every((entry) => typeof entry === "number" && Number.isFinite(entry)) &&
+    (!("cacheWrite1h" in value) ||
+      value.cacheWrite1h === undefined ||
+      typeof value.cacheWrite1h === "number") &&
+    (!("reasoning" in value) ||
+      value.reasoning === undefined ||
+      typeof value.reasoning === "number")
+  );
 }
 
-function assertPiToolResult(value: unknown, hook: string): asserts value is PiToolResult<unknown> {
+function assertPiToolResult(
+  value: unknown,
+  hook: string,
+): asserts value is PiToolResult<unknown> {
   if (!isPiToolResult(value)) {
     throw new TypeError(`${hook} must return a valid Pi tool result`);
   }
 }
 
-async function awaitWithAbort<T>(value: Awaitable<T>, signal: AbortSignal | undefined): Promise<T> {
+async function awaitWithAbort<T>(
+  value: Awaitable<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
   if (!signal) return await value;
   throwIfAborted(signal);
   return await new Promise<T>((resolve, reject) => {
@@ -678,7 +769,9 @@ async function reportError(
 }
 
 function formatIssues(issues: readonly StandardSchemaIssue[]): string {
-  return issues.map((issue) => issue.message?.trim() || "Invalid input").join("; ");
+  return issues
+    .map((issue) => issue.message?.trim() || "Invalid input")
+    .join("; ");
 }
 
 function errorMessage(error: unknown): string {

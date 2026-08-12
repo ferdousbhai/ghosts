@@ -155,6 +155,8 @@ export type AdaptPiToolOptions<TInput = unknown, TOutput = unknown, TDetails = u
     createTimeoutError?: (context: ToolInvocationContext<TInput> & Readonly<{
         timeoutMs: number;
     }>) => unknown;
+    /** Preserve safety-critical executor failures discovered while abort cleanup settles. */
+    preferCaughtErrorOverAbort?: (error: unknown) => boolean;
     mapUpdate?: (defaultResult: PiToolResult<unknown>, context: ToolUpdateContext<TInput>) => PiToolResult<unknown>;
     /** Bound, paginate, redact, or otherwise reshape a completed result. */
     mapResult?: (defaultResult: PiToolResult<unknown>, context: ToolResultContext<TInput, TOutput>) => Awaitable<PiToolResult<TDetails>>;
