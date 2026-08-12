@@ -140,16 +140,22 @@ describe("app-wide tool cache client", () => {
     })).resolves.toBe("fresh");
   });
 
-  it("returns successful provider values when serialization fails", async () => {
-    const { cache } = harness();
-    const cyclic: Record<string, unknown> = {};
-    cyclic.self = cyclic;
+  it("returns successful JSON values when cache serialization fails", async () => {
+    const cache = createAppToolCache({
+      getByName: () => ({
+        fulfill: vi.fn(async () => { throw new Error("storage unavailable"); }),
+        getOrReserve: vi.fn(async () => ({ lease: "lease", status: "leader" as const })),
+        release: vi.fn(async () => {}),
+        remove: vi.fn(async () => {}),
+      }),
+    });
+    const value = { result: "provider" } as const;
 
     await expect(cache.getOrLoad({
       namespace: "generic:v1",
-      params: { id: "cyclic-result" },
-      load: async () => cyclic,
-    })).resolves.toBe(cyclic);
+      params: { id: "storage-failure" },
+      load: async () => value,
+    })).resolves.toEqual(value);
   });
 
   it("fails open when key or stub construction fails", async () => {

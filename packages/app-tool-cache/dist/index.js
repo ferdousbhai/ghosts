@@ -78,7 +78,8 @@ export function createAppToolCache(namespace) {
                 }
                 return loaded;
             }
-            throw new Error("AppToolCacheCoordinationExhausted");
+            input.signal?.throwIfAborted();
+            return input.load();
         },
     };
 }

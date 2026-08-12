@@ -17,11 +17,19 @@ export interface AppToolCacheNamespace {
   getByName(name: string): AppToolCacheEntryRpc;
 }
 
+export type AppToolCacheJson =
+  | boolean
+  | null
+  | number
+  | string
+  | readonly AppToolCacheJson[]
+  | Readonly<{ [key: string]: AppToolCacheJson }>;
+
 export interface AppToolCache {
-  getOrLoad<T>(input: AppToolCacheLoadInput<T>): Promise<T>;
+  getOrLoad<T extends AppToolCacheJson>(input: AppToolCacheLoadInput<T>): Promise<T>;
 }
 
-type AppToolCacheLoadInput<T> = Readonly<{
+type AppToolCacheLoadInput<T extends AppToolCacheJson> = Readonly<{
   namespace: string;
   params: Readonly<Record<string, unknown>>;
   load: () => Promise<T>;
@@ -38,7 +46,7 @@ export function createAppToolCache(
   namespace: AppToolCacheNamespace,
 ): AppToolCache {
   return {
-    async getOrLoad<T>(input: AppToolCacheLoadInput<T>): Promise<T> {
+    async getOrLoad<T extends AppToolCacheJson>(input: AppToolCacheLoadInput<T>): Promise<T> {
       input.signal?.throwIfAborted();
       let entry: AppToolCacheEntryRpc;
       try {
@@ -105,7 +113,8 @@ export function createAppToolCache(
         }
         return loaded;
       }
-      throw new Error("AppToolCacheCoordinationExhausted");
+      input.signal?.throwIfAborted();
+      return input.load();
     },
   };
 }

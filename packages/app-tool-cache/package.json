@@ -5,7 +5,13 @@
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
-  "files": ["dist", "src", "README.md"],
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ferdousbhai/ghosts.git",
+    "directory": "packages/app-tool-cache"
+  },
+  "files": ["dist", "src", "README.md", "LICENSE"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },

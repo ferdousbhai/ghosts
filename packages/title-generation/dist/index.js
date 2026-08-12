@@ -22,7 +22,7 @@ const WEAK_TITLES = new Set([
     "project",
 ]);
 function isWeakTitle(value) {
-    return WEAK_TITLES.has(normalizeWhitespace(value).toLocaleLowerCase());
+    return WEAK_TITLES.has(normalizeWhitespace(value).toLowerCase());
 }
 function extractNamedSubject(value) {
     return value.match(QUOTED_NAMED_SUBJECT_PATTERN)?.[2] ??

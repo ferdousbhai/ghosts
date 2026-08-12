@@ -54,7 +54,7 @@ export type GenerateTitleResult<Result extends TitleGenerationTextResult> =
   }>;
 
 function isWeakTitle(value: string | null | undefined): boolean {
-  return WEAK_TITLES.has(normalizeWhitespace(value).toLocaleLowerCase());
+  return WEAK_TITLES.has(normalizeWhitespace(value).toLowerCase());
 }
 
 function extractNamedSubject(value: string): string | undefined {

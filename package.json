@@ -5,7 +5,8 @@
   "packageManager": "pnpm@10.27.0",
   "scripts": {
     "build": "pnpm --recursive build",
-    "check": "pnpm build && pnpm typecheck && pnpm test",
+    "check": "pnpm build && pnpm typecheck && pnpm test && pnpm check:dist",
+    "check:dist": "git diff --exit-code -- packages/*/dist",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

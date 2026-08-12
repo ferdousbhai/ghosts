@@ -14,8 +14,8 @@ Public reusable modules for SummonGhost-related applications.
 
 Consumers pin packages to an exact reachable Git commit. For a breaking or behavioral change:
 
-1. Update this repository and its tests first.
-2. During local coordination, consumers may temporarily use `link:../ghosts/packages/<package>`; never commit or push a `link:`, `file:`, branch, or moving-main dependency.
+1. Update this repository and its tests first; run `pnpm check`, which also verifies that rebuilt `dist` artifacts are committed.
+2. During local coordination, consumers may temporarily use `link:<relative-path-to-ghosts>/packages/<package>` (relative to the consumer package manifest); never commit or push a `link:`, `file:`, branch, or moving-main dependency.
 3. Run the affected consumer tests against that local link.
 4. Commit and push `ghosts`, then obtain the immutable commit SHA.
 5. Replace each temporary link with `github:ferdousbhai/ghosts#<full-sha>&path:/packages/<package>`, refresh its lockfile, and rerun that consumer's complete checks.
