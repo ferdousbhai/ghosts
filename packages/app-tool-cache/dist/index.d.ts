@@ -1,4 +1,10 @@
+/** How long a successfully persisted provider result remains reusable. */
 export declare const APP_TOOL_CACHE_TTL_MS: number;
+/**
+ * Maximum lifetime of a miss-coordination lease. Provider requests should
+ * complete or release their lease within this window.
+ */
+export declare const APP_TOOL_CACHE_LEASE_TTL_MS = 30000;
 export declare const APP_TOOL_CACHE_MAX_BYTES = 1900000;
 export type AppToolCacheReservation = Readonly<{
     status: "hit";

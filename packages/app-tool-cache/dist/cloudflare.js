@@ -1,9 +1,8 @@
-import { APP_TOOL_CACHE_MAX_BYTES, APP_TOOL_CACHE_TTL_MS, } from "./index.js";
+import { APP_TOOL_CACHE_LEASE_TTL_MS, APP_TOOL_CACHE_MAX_BYTES, APP_TOOL_CACHE_TTL_MS, } from "./index.js";
 const CACHE_KEY = "result";
 const CACHE_METADATA_KEY = "result-metadata";
 const LEASE_KEY = "lease";
 const CACHE_VERSION = 1;
-const LEASE_TTL_MS = APP_TOOL_CACHE_TTL_MS;
 /** Add shared cache storage and miss coordination to a consumer's DurableObject base. */
 export function appToolCacheDurableObject(DurableObjectBaseClass) {
     class AppToolCacheDurableObject extends DurableObjectBaseClass {
@@ -42,7 +41,7 @@ export function appToolCacheDurableObject(DurableObjectBaseClass) {
             if (this.#pending)
                 this.#finish(this.#pending.lease, null);
             const lease = crypto.randomUUID();
-            const expiresAt = now + LEASE_TTL_MS;
+            const expiresAt = now + APP_TOOL_CACHE_LEASE_TTL_MS;
             await this.#cacheStorage.put(LEASE_KEY, { expiresAt, lease });
             try {
                 await this.#cacheStorage.setAlarm(expiresAt);

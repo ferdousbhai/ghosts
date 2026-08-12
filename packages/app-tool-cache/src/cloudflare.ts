@@ -1,4 +1,5 @@
 import {
+  APP_TOOL_CACHE_LEASE_TTL_MS,
   APP_TOOL_CACHE_MAX_BYTES,
   APP_TOOL_CACHE_TTL_MS,
   type AppToolCacheReservation,
@@ -8,7 +9,6 @@ const CACHE_KEY = "result";
 const CACHE_METADATA_KEY = "result-metadata";
 const LEASE_KEY = "lease";
 const CACHE_VERSION = 1;
-const LEASE_TTL_MS = APP_TOOL_CACHE_TTL_MS;
 
 type CachedMetadata = Readonly<{
   expiresAt: number;
@@ -76,7 +76,7 @@ export function appToolCacheDurableObject<
     if (this.#pending) this.#finish(this.#pending.lease, null);
 
     const lease = crypto.randomUUID();
-    const expiresAt = now + LEASE_TTL_MS;
+    const expiresAt = now + APP_TOOL_CACHE_LEASE_TTL_MS;
     await this.#cacheStorage.put<StoredLease>(LEASE_KEY, { expiresAt, lease });
     try {
       await this.#cacheStorage.setAlarm(expiresAt);

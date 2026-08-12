@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  APP_TOOL_CACHE_LEASE_TTL_MS,
   APP_TOOL_CACHE_MAX_BYTES,
   APP_TOOL_CACHE_TTL_MS,
   createAppToolCache,
@@ -86,7 +87,7 @@ describe("app-wide tool cache entry", () => {
     expect(reservation.status).toBe("leader");
     if (reservation.status !== "leader") return;
     await expect(storage.getAlarm()).resolves.toBe(
-      now.getTime() + APP_TOOL_CACHE_TTL_MS,
+      now.getTime() + APP_TOOL_CACHE_LEASE_TTL_MS,
     );
 
     await expect(cache.fulfill(reservation.lease, '"shared"', true))
@@ -116,50 +117,83 @@ describe("app-wide tool cache entry", () => {
     });
   });
 
-  it("wakes concurrent followers without another provider lease", async () => {
+  it("deduplicates concurrent misses for the full live lease", async () => {
     const cache = entry();
     const reservation = await cache.getOrReserve();
     expect(reservation.status).toBe("leader");
     if (reservation.status !== "leader") return;
 
+    vi.setSystemTime(now.getTime() + APP_TOOL_CACHE_LEASE_TTL_MS - 1);
     const follower = cache.getOrReserve();
+    await expect(Promise.race([follower, Promise.resolve("pending")]))
+      .resolves.toBe("pending");
     await cache.fulfill(reservation.lease, '"once"', true);
 
     await expect(follower).resolves.toEqual({ status: "hit", value: '"once"' });
   });
 
-  it("physically deletes results when their alarm expires", async () => {
+  it("keeps the five-minute result TTL independent from the lease", async () => {
+    expect(APP_TOOL_CACHE_LEASE_TTL_MS).toBeLessThan(APP_TOOL_CACHE_TTL_MS);
     const storage = createStorage();
     const cache = entry(storage);
     const reservation = await cache.getOrReserve();
     expect(reservation.status).toBe("leader");
     if (reservation.status !== "leader") return;
+
+    const fulfilledAt = now.getTime() + APP_TOOL_CACHE_LEASE_TTL_MS - 1;
+    vi.setSystemTime(fulfilledAt);
     await cache.fulfill(reservation.lease, '"temporary"', true);
+    const resultExpiresAt = fulfilledAt + APP_TOOL_CACHE_TTL_MS;
+    await expect(storage.getAlarm()).resolves.toBe(resultExpiresAt);
 
-    vi.setSystemTime(now.getTime() + APP_TOOL_CACHE_TTL_MS);
+    vi.setSystemTime(fulfilledAt + APP_TOOL_CACHE_LEASE_TTL_MS);
     await cache.alarm();
+    await expect(storage.get<string>("result")).resolves.toBe('"temporary"');
+    await expect(storage.getAlarm()).resolves.toBe(resultExpiresAt);
 
+    vi.setSystemTime(resultExpiresAt);
+    await cache.alarm();
     await expect(storage.get<unknown>("result")).resolves.toBeUndefined();
     await expect(storage.getAlarm()).resolves.toBeNull();
-    await expect(cache.getOrReserve()).resolves.toMatchObject({
-      status: "leader",
-    });
   });
 
-  it("expires abandoned leases and wakes followers to retry", async () => {
+  it("expires a dead leader lease and wakes followers to retry", async () => {
     const storage = createStorage();
     const cache = entry(storage);
     const reservation = await cache.getOrReserve();
     expect(reservation.status).toBe("leader");
     if (reservation.status !== "leader") return;
     const follower = cache.getOrReserve();
+    await expect(Promise.race([follower, Promise.resolve("pending")]))
+      .resolves.toBe("pending");
 
-    vi.setSystemTime(now.getTime() + APP_TOOL_CACHE_TTL_MS);
+    vi.setSystemTime(now.getTime() + APP_TOOL_CACHE_LEASE_TTL_MS);
     await cache.alarm();
 
     await expect(follower).resolves.toEqual({ status: "retry" });
     await expect(storage.get<unknown>("lease")).resolves.toBeUndefined();
     await expect(storage.getAlarm()).resolves.toBeNull();
+
+    const replacement = await cache.getOrReserve();
+    expect(replacement.status).toBe("leader");
+    if (replacement.status !== "leader") return;
+    const replacementFollower = cache.getOrReserve();
+    await expect(Promise.race([
+      replacementFollower,
+      Promise.resolve("pending"),
+    ])).resolves.toBe("pending");
+
+    await expect(cache.fulfill(reservation.lease, '"stale"', true))
+      .resolves.toBe(false);
+    await expect(Promise.race([
+      replacementFollower,
+      Promise.resolve("pending"),
+    ])).resolves.toBe("pending");
+    await cache.fulfill(replacement.lease, '"replacement"', true);
+    await expect(replacementFollower).resolves.toEqual({
+      status: "hit",
+      value: '"replacement"',
+    });
   });
 
   it("single-flights byte-oversized values without persisting them", async () => {
