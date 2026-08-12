@@ -25,6 +25,19 @@ export type AppToolCacheJson =
   | readonly AppToolCacheJson[]
   | Readonly<{ [key: string]: AppToolCacheJson }>;
 
+export function isAppToolCacheJson(value: unknown, ancestors = new WeakSet<object>()): value is AppToolCacheJson {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "object" || ancestors.has(value)) return false;
+  ancestors.add(value);
+  const valid = Array.isArray(value)
+    ? value.every((item) => isAppToolCacheJson(item, ancestors))
+    : isPlainRecord(value)
+      && Object.values(value).every((item) => isAppToolCacheJson(item, ancestors));
+  ancestors.delete(value);
+  return valid;
+}
+
 export interface AppToolCache {
   getOrLoad<T extends AppToolCacheJson>(input: AppToolCacheLoadInput<T>): Promise<T>;
 }

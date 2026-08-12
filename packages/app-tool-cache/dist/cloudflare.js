@@ -7,67 +7,67 @@ const LEASE_TTL_MS = APP_TOOL_CACHE_TTL_MS;
 /** Add shared cache storage and miss coordination to a consumer's DurableObject base. */
 export function appToolCacheDurableObject(DurableObjectBaseClass) {
     class AppToolCacheDurableObject extends DurableObjectBaseClass {
-        pending = null;
-        get cacheStorage() {
+        #pending = null;
+        get #cacheStorage() {
             return this.ctx.storage;
         }
         async getOrReserve() {
             const now = Date.now();
             const [cachedValue, cachedMetadata, storedLease] = await Promise.all([
-                this.cacheStorage.get(CACHE_KEY),
-                this.cacheStorage.get(CACHE_METADATA_KEY),
-                this.cacheStorage.get(LEASE_KEY),
+                this.#cacheStorage.get(CACHE_KEY),
+                this.#cacheStorage.get(CACHE_METADATA_KEY),
+                this.#cacheStorage.get(LEASE_KEY),
             ]);
             if (cachedMetadata?.version === CACHE_VERSION
                 && cachedMetadata.expiresAt > now
                 && typeof cachedValue === "string"
                 && fitsStorageLimit(cachedValue)) {
                 if (storedLease) {
-                    await this.cacheStorage.delete(LEASE_KEY);
-                    this.finish(storedLease.lease, cachedValue);
+                    await this.#cacheStorage.delete(LEASE_KEY);
+                    this.#finish(storedLease.lease, cachedValue);
                 }
                 return { status: "hit", value: cachedValue };
             }
             if (cachedValue !== undefined || cachedMetadata) {
-                await this.cacheStorage.delete(CACHE_KEY);
-                await this.cacheStorage.delete(CACHE_METADATA_KEY);
+                await this.#cacheStorage.delete(CACHE_KEY);
+                await this.#cacheStorage.delete(CACHE_METADATA_KEY);
             }
             if (storedLease?.expiresAt && storedLease.expiresAt > now) {
-                const pending = this.ensurePending(storedLease);
+                const pending = this.#ensurePending(storedLease);
                 const value = await pending.promise;
                 return value === null ? { status: "retry" } : { status: "hit", value };
             }
             if (storedLease)
-                await this.cacheStorage.delete(LEASE_KEY);
-            if (this.pending)
-                this.finish(this.pending.lease, null);
+                await this.#cacheStorage.delete(LEASE_KEY);
+            if (this.#pending)
+                this.#finish(this.#pending.lease, null);
             const lease = crypto.randomUUID();
             const expiresAt = now + LEASE_TTL_MS;
-            await this.cacheStorage.put(LEASE_KEY, { expiresAt, lease });
+            await this.#cacheStorage.put(LEASE_KEY, { expiresAt, lease });
             try {
-                await this.cacheStorage.setAlarm(expiresAt);
+                await this.#cacheStorage.setAlarm(expiresAt);
             }
             catch (error) {
-                await this.deleteAllStorage();
+                await this.#deleteAllStorage();
                 throw error;
             }
-            this.ensurePending({ expiresAt, lease });
+            this.#ensurePending({ expiresAt, lease });
             return { lease, status: "leader" };
         }
         async fulfill(lease, value, persist) {
-            const storedLease = await this.cacheStorage.get(LEASE_KEY);
+            const storedLease = await this.#cacheStorage.get(LEASE_KEY);
             if (storedLease?.lease !== lease
                 || storedLease.expiresAt <= Date.now()) {
                 if (storedLease?.lease === lease) {
-                    await this.cacheStorage.delete(LEASE_KEY);
+                    await this.#cacheStorage.delete(LEASE_KEY);
                 }
-                this.finish(lease, null);
+                this.#finish(lease, null);
                 return false;
             }
             let cacheable = persist && fitsStorageLimit(value);
             if (cacheable) {
                 const expiresAt = Date.now() + APP_TOOL_CACHE_TTL_MS;
-                await this.cacheStorage.transaction(async (transaction) => {
+                await this.#cacheStorage.transaction(async (transaction) => {
                     await transaction.put(CACHE_KEY, value);
                     await transaction.put(CACHE_METADATA_KEY, {
                         expiresAt,
@@ -76,49 +76,49 @@ export function appToolCacheDurableObject(DurableObjectBaseClass) {
                     await transaction.delete(LEASE_KEY);
                 });
                 try {
-                    await this.cacheStorage.setAlarm(expiresAt);
+                    await this.#cacheStorage.setAlarm(expiresAt);
                 }
                 catch {
                     cacheable = false;
-                    await this.deleteAllStorage();
+                    await this.#deleteAllStorage();
                 }
             }
             else {
-                await this.deleteAllStorage();
+                await this.#deleteAllStorage();
             }
-            this.finish(lease, value);
+            this.#finish(lease, value);
             return cacheable;
         }
         async release(lease) {
-            const storedLease = await this.cacheStorage.get(LEASE_KEY);
+            const storedLease = await this.#cacheStorage.get(LEASE_KEY);
             if (storedLease?.lease === lease)
-                await this.deleteAllStorage();
-            this.finish(lease, null);
+                await this.#deleteAllStorage();
+            this.#finish(lease, null);
         }
         async remove(value) {
             const [cachedValue, storedLease] = await Promise.all([
-                this.cacheStorage.get(CACHE_KEY),
-                this.cacheStorage.get(LEASE_KEY),
+                this.#cacheStorage.get(CACHE_KEY),
+                this.#cacheStorage.get(LEASE_KEY),
             ]);
             if (cachedValue !== value)
                 return;
-            await this.cacheStorage.delete(CACHE_KEY);
-            await this.cacheStorage.delete(CACHE_METADATA_KEY);
+            await this.#cacheStorage.delete(CACHE_KEY);
+            await this.#cacheStorage.delete(CACHE_METADATA_KEY);
             if (storedLease?.expiresAt && storedLease.expiresAt > Date.now()) {
                 return;
             }
             if (storedLease) {
-                await this.cacheStorage.delete(LEASE_KEY);
-                this.finish(storedLease.lease, null);
+                await this.#cacheStorage.delete(LEASE_KEY);
+                this.#finish(storedLease.lease, null);
             }
-            await this.deleteAllStorage();
+            await this.#deleteAllStorage();
         }
         async alarm() {
             const now = Date.now();
             const [cachedValue, cachedMetadata, storedLease] = await Promise.all([
-                this.cacheStorage.get(CACHE_KEY),
-                this.cacheStorage.get(CACHE_METADATA_KEY),
-                this.cacheStorage.get(LEASE_KEY),
+                this.#cacheStorage.get(CACHE_KEY),
+                this.#cacheStorage.get(CACHE_METADATA_KEY),
+                this.#cacheStorage.get(LEASE_KEY),
             ]);
             const expirations = [];
             if (cachedMetadata?.version === CACHE_VERSION
@@ -128,51 +128,51 @@ export function appToolCacheDurableObject(DurableObjectBaseClass) {
                 expirations.push(cachedMetadata.expiresAt);
             }
             else if (cachedValue !== undefined || cachedMetadata) {
-                await this.cacheStorage.delete(CACHE_KEY);
-                await this.cacheStorage.delete(CACHE_METADATA_KEY);
+                await this.#cacheStorage.delete(CACHE_KEY);
+                await this.#cacheStorage.delete(CACHE_METADATA_KEY);
             }
             if (storedLease?.expiresAt && storedLease.expiresAt > now) {
                 expirations.push(storedLease.expiresAt);
             }
             else if (storedLease) {
-                await this.cacheStorage.delete(LEASE_KEY);
-                this.finish(storedLease.lease, null);
+                await this.#cacheStorage.delete(LEASE_KEY);
+                this.#finish(storedLease.lease, null);
             }
             const nextExpiration = expirations.length
                 ? Math.min(...expirations)
                 : null;
             if (nextExpiration !== null) {
-                await this.cacheStorage.setAlarm(nextExpiration);
+                await this.#cacheStorage.setAlarm(nextExpiration);
                 return;
             }
-            await this.deleteAllStorage();
+            await this.#deleteAllStorage();
         }
-        ensurePending(input) {
-            if (this.pending?.lease === input.lease)
-                return this.pending;
-            if (this.pending)
-                this.finish(this.pending.lease, null);
+        #ensurePending(input) {
+            if (this.#pending?.lease === input.lease)
+                return this.#pending;
+            if (this.#pending)
+                this.#finish(this.#pending.lease, null);
             let resolve;
             const promise = new Promise((complete) => {
                 resolve = complete;
             });
-            this.pending = {
+            this.#pending = {
                 lease: input.lease,
                 promise,
                 resolve,
             };
-            return this.pending;
+            return this.#pending;
         }
-        finish(lease, value) {
-            if (this.pending?.lease !== lease)
+        #finish(lease, value) {
+            if (this.#pending?.lease !== lease)
                 return;
-            const pending = this.pending;
-            this.pending = null;
+            const pending = this.#pending;
+            this.#pending = null;
             pending.resolve(value);
         }
-        async deleteAllStorage() {
-            await this.cacheStorage.deleteAlarm();
-            await this.cacheStorage.deleteAll();
+        async #deleteAllStorage() {
+            await this.#cacheStorage.deleteAlarm();
+            await this.#cacheStorage.deleteAll();
         }
     }
     return AppToolCacheDurableObject;

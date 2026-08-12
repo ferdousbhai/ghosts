@@ -1,5 +1,20 @@
 export const APP_TOOL_CACHE_TTL_MS = 5 * 60_000;
 export const APP_TOOL_CACHE_MAX_BYTES = 1_900_000;
+export function isAppToolCacheJson(value, ancestors = new WeakSet()) {
+    if (value === null || typeof value === "string" || typeof value === "boolean")
+        return true;
+    if (typeof value === "number")
+        return Number.isFinite(value);
+    if (typeof value !== "object" || ancestors.has(value))
+        return false;
+    ancestors.add(value);
+    const valid = Array.isArray(value)
+        ? value.every((item) => isAppToolCacheJson(item, ancestors))
+        : isPlainRecord(value)
+            && Object.values(value).every((item) => isAppToolCacheJson(item, ancestors));
+    ancestors.delete(value);
+    return valid;
+}
 /**
  * Build the application cache client over request-keyed Durable Objects. Each
  * object coordinates one exact public provider request, avoiding a singleton

@@ -7,6 +7,7 @@
     "build": "pnpm --recursive build",
     "check": "pnpm build && pnpm typecheck && pnpm test && pnpm check:dist",
     "check:dist": "git diff --exit-code -- packages/*/dist",
+    "check:exports": "node -e \"Promise.all([import('./packages/app-tool-cache/dist/index.js'),import('./packages/app-tool-cache/dist/cloudflare.js'),import('./packages/title-generation/dist/index.js')])\"",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

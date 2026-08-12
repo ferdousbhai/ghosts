@@ -21,6 +21,7 @@ export interface AppToolCacheNamespace {
 export type AppToolCacheJson = boolean | null | number | string | readonly AppToolCacheJson[] | Readonly<{
     [key: string]: AppToolCacheJson;
 }>;
+export declare function isAppToolCacheJson(value: unknown, ancestors?: WeakSet<object>): value is AppToolCacheJson;
 export interface AppToolCache {
     getOrLoad<T extends AppToolCacheJson>(input: AppToolCacheLoadInput<T>): Promise<T>;
 }
