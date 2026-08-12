@@ -26,7 +26,7 @@ const WEAK_TITLES = new Set([
   "project",
 ]);
 
-type TitleSubject = "conversation" | "project";
+export type TitleSubject = "conversation" | "project";
 
 type TitleGenerationPromptInput = Readonly<{
   prompt: string;

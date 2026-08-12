@@ -1,6 +1,6 @@
 export declare const MAX_GENERATED_TITLE_CHARACTERS = 60;
 export declare const CONVERSATION_TITLE_REGENERATION_PROMPT_CHARACTERS = 64;
-type TitleSubject = "conversation" | "project";
+export type TitleSubject = "conversation" | "project";
 type TitleGenerationPromptInput = Readonly<{
     prompt: string;
     subject: TitleSubject;

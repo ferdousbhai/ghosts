@@ -1,4 +1,3 @@
-import { DurableObject } from "cloudflare:workers";
 import {
   APP_TOOL_CACHE_MAX_BYTES,
   APP_TOOL_CACHE_TTL_MS,
@@ -27,16 +26,29 @@ type PendingValue = {
   resolve: (value: string | null) => void;
 };
 
-/** One instance per hashed request: shared cache entry plus miss coordination. */
-export class AppToolCacheDurableObject extends DurableObject<Cloudflare.Env> {
-  private pending: PendingValue | null = null;
+// The runtime base is consumer-injected so this package remains testable and
+// does not force Node tooling to resolve the `cloudflare:workers` protocol.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: mixin constructors require any[].
+type DurableObjectBase = abstract new (...args: any[]) => object;
+
+/** Add shared cache storage and miss coordination to a consumer's DurableObject base. */
+export function appToolCacheDurableObject<
+  Base extends DurableObjectBase,
+>(DurableObjectBaseClass: Base) {
+  abstract class AppToolCacheDurableObject extends DurableObjectBaseClass {
+  pending: PendingValue | null = null;
+
+  get cacheStorage(): DurableObjectStorage {
+    return (this as unknown as { ctx: { storage: DurableObjectStorage } }).ctx.storage;
+  }
 
   async getOrReserve(): Promise<AppToolCacheReservation> {
     const now = Date.now();
     const [cachedValue, cachedMetadata, storedLease] = await Promise.all([
-      this.ctx.storage.get<string>(CACHE_KEY),
-      this.ctx.storage.get<CachedMetadata>(CACHE_METADATA_KEY),
-      this.ctx.storage.get<StoredLease>(LEASE_KEY),
+      this.cacheStorage.get<string>(CACHE_KEY),
+      this.cacheStorage.get<CachedMetadata>(CACHE_METADATA_KEY),
+      this.cacheStorage.get<StoredLease>(LEASE_KEY),
     ]);
     if (
       cachedMetadata?.version === CACHE_VERSION
@@ -45,14 +57,14 @@ export class AppToolCacheDurableObject extends DurableObject<Cloudflare.Env> {
       && fitsStorageLimit(cachedValue)
     ) {
       if (storedLease) {
-        await this.ctx.storage.delete(LEASE_KEY);
+        await this.cacheStorage.delete(LEASE_KEY);
         this.finish(storedLease.lease, cachedValue);
       }
       return { status: "hit", value: cachedValue };
     }
     if (cachedValue !== undefined || cachedMetadata) {
-      await this.ctx.storage.delete(CACHE_KEY);
-      await this.ctx.storage.delete(CACHE_METADATA_KEY);
+      await this.cacheStorage.delete(CACHE_KEY);
+      await this.cacheStorage.delete(CACHE_METADATA_KEY);
     }
 
     if (storedLease?.expiresAt && storedLease.expiresAt > now) {
@@ -60,14 +72,14 @@ export class AppToolCacheDurableObject extends DurableObject<Cloudflare.Env> {
       const value = await pending.promise;
       return value === null ? { status: "retry" } : { status: "hit", value };
     }
-    if (storedLease) await this.ctx.storage.delete(LEASE_KEY);
+    if (storedLease) await this.cacheStorage.delete(LEASE_KEY);
     if (this.pending) this.finish(this.pending.lease, null);
 
     const lease = crypto.randomUUID();
     const expiresAt = now + LEASE_TTL_MS;
-    await this.ctx.storage.put<StoredLease>(LEASE_KEY, { expiresAt, lease });
+    await this.cacheStorage.put<StoredLease>(LEASE_KEY, { expiresAt, lease });
     try {
-      await this.ctx.storage.setAlarm(expiresAt);
+      await this.cacheStorage.setAlarm(expiresAt);
     } catch (error) {
       await this.deleteAllStorage();
       throw error;
@@ -81,13 +93,13 @@ export class AppToolCacheDurableObject extends DurableObject<Cloudflare.Env> {
     value: string,
     persist: boolean,
   ): Promise<boolean> {
-    const storedLease = await this.ctx.storage.get<StoredLease>(LEASE_KEY);
+    const storedLease = await this.cacheStorage.get<StoredLease>(LEASE_KEY);
     if (
       storedLease?.lease !== lease
       || storedLease.expiresAt <= Date.now()
     ) {
       if (storedLease?.lease === lease) {
-        await this.ctx.storage.delete(LEASE_KEY);
+        await this.cacheStorage.delete(LEASE_KEY);
       }
       this.finish(lease, null);
       return false;
@@ -96,7 +108,7 @@ export class AppToolCacheDurableObject extends DurableObject<Cloudflare.Env> {
     let cacheable = persist && fitsStorageLimit(value);
     if (cacheable) {
       const expiresAt = Date.now() + APP_TOOL_CACHE_TTL_MS;
-      await this.ctx.storage.transaction(async (transaction) => {
+      await this.cacheStorage.transaction(async (transaction) => {
         await transaction.put<string>(CACHE_KEY, value);
         await transaction.put<CachedMetadata>(CACHE_METADATA_KEY, {
           expiresAt,
@@ -105,7 +117,7 @@ export class AppToolCacheDurableObject extends DurableObject<Cloudflare.Env> {
         await transaction.delete(LEASE_KEY);
       });
       try {
-        await this.ctx.storage.setAlarm(expiresAt);
+        await this.cacheStorage.setAlarm(expiresAt);
       } catch {
         cacheable = false;
         await this.deleteAllStorage();
@@ -118,24 +130,24 @@ export class AppToolCacheDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   async release(lease: string): Promise<void> {
-    const storedLease = await this.ctx.storage.get<StoredLease>(LEASE_KEY);
+    const storedLease = await this.cacheStorage.get<StoredLease>(LEASE_KEY);
     if (storedLease?.lease === lease) await this.deleteAllStorage();
     this.finish(lease, null);
   }
 
   async remove(value: string): Promise<void> {
     const [cachedValue, storedLease] = await Promise.all([
-      this.ctx.storage.get<string>(CACHE_KEY),
-      this.ctx.storage.get<StoredLease>(LEASE_KEY),
+      this.cacheStorage.get<string>(CACHE_KEY),
+      this.cacheStorage.get<StoredLease>(LEASE_KEY),
     ]);
     if (cachedValue !== value) return;
-    await this.ctx.storage.delete(CACHE_KEY);
-    await this.ctx.storage.delete(CACHE_METADATA_KEY);
+    await this.cacheStorage.delete(CACHE_KEY);
+    await this.cacheStorage.delete(CACHE_METADATA_KEY);
     if (storedLease?.expiresAt && storedLease.expiresAt > Date.now()) {
       return;
     }
     if (storedLease) {
-      await this.ctx.storage.delete(LEASE_KEY);
+      await this.cacheStorage.delete(LEASE_KEY);
       this.finish(storedLease.lease, null);
     }
     await this.deleteAllStorage();
@@ -144,9 +156,9 @@ export class AppToolCacheDurableObject extends DurableObject<Cloudflare.Env> {
   async alarm(): Promise<void> {
     const now = Date.now();
     const [cachedValue, cachedMetadata, storedLease] = await Promise.all([
-      this.ctx.storage.get<string>(CACHE_KEY),
-      this.ctx.storage.get<CachedMetadata>(CACHE_METADATA_KEY),
-      this.ctx.storage.get<StoredLease>(LEASE_KEY),
+      this.cacheStorage.get<string>(CACHE_KEY),
+      this.cacheStorage.get<CachedMetadata>(CACHE_METADATA_KEY),
+      this.cacheStorage.get<StoredLease>(LEASE_KEY),
     ]);
     const expirations: number[] = [];
     if (
@@ -157,13 +169,13 @@ export class AppToolCacheDurableObject extends DurableObject<Cloudflare.Env> {
     ) {
       expirations.push(cachedMetadata.expiresAt);
     } else if (cachedValue !== undefined || cachedMetadata) {
-      await this.ctx.storage.delete(CACHE_KEY);
-      await this.ctx.storage.delete(CACHE_METADATA_KEY);
+      await this.cacheStorage.delete(CACHE_KEY);
+      await this.cacheStorage.delete(CACHE_METADATA_KEY);
     }
     if (storedLease?.expiresAt && storedLease.expiresAt > now) {
       expirations.push(storedLease.expiresAt);
     } else if (storedLease) {
-      await this.ctx.storage.delete(LEASE_KEY);
+      await this.cacheStorage.delete(LEASE_KEY);
       this.finish(storedLease.lease, null);
     }
 
@@ -171,13 +183,13 @@ export class AppToolCacheDurableObject extends DurableObject<Cloudflare.Env> {
       ? Math.min(...expirations)
       : null;
     if (nextExpiration !== null) {
-      await this.ctx.storage.setAlarm(nextExpiration);
+      await this.cacheStorage.setAlarm(nextExpiration);
       return;
     }
     await this.deleteAllStorage();
   }
 
-  private ensurePending(input: StoredLease): PendingValue {
+  ensurePending(input: StoredLease): PendingValue {
     if (this.pending?.lease === input.lease) return this.pending;
     if (this.pending) this.finish(this.pending.lease, null);
     let resolve!: (value: string | null) => void;
@@ -192,17 +204,19 @@ export class AppToolCacheDurableObject extends DurableObject<Cloudflare.Env> {
     return this.pending;
   }
 
-  private finish(lease: string, value: string | null): void {
+  finish(lease: string, value: string | null): void {
     if (this.pending?.lease !== lease) return;
     const pending = this.pending;
     this.pending = null;
     pending.resolve(value);
   }
 
-  private async deleteAllStorage(): Promise<void> {
-    await this.ctx.storage.deleteAlarm();
-    await this.ctx.storage.deleteAll();
+  async deleteAllStorage(): Promise<void> {
+    await this.cacheStorage.deleteAlarm();
+    await this.cacheStorage.deleteAll();
   }
+  }
+  return AppToolCacheDurableObject;
 }
 
 function fitsStorageLimit(value: string): boolean {

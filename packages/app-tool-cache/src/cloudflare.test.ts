@@ -4,7 +4,11 @@ import {
   APP_TOOL_CACHE_TTL_MS,
   createAppToolCache,
 } from "./index";
-import { AppToolCacheDurableObject } from "./cloudflare";
+import { appToolCacheDurableObject } from "./cloudflare";
+import { DurableObject } from "cloudflare:workers";
+
+const SharedAppToolCacheDurableObject = appToolCacheDurableObject(DurableObject);
+class TestAppToolCacheDurableObject extends SharedAppToolCacheDurableObject {}
 
 interface FakeStorage {
   delete(key: string): Promise<boolean>;
@@ -56,8 +60,8 @@ function createStorage(options: Readonly<{
   return storage;
 }
 
-function entry(storage = createStorage()): AppToolCacheDurableObject {
-  return new AppToolCacheDurableObject(
+function entry(storage = createStorage()): TestAppToolCacheDurableObject {
+  return new TestAppToolCacheDurableObject(
     { storage } as unknown as DurableObjectState,
     {} as Cloudflare.Env,
   );
