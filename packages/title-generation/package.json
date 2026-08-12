@@ -1,0 +1,11 @@
+{
+  "name": "@summonghost/title-generation",
+  "version": "0.2.0",
+  "description": "Provider-independent title generation prompts and validation",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@summonghost/app-tool-cache",
+  "version": "0.1.0",
+  "description": "Exact-request cache coordination with a Cloudflare Durable Object adapter",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./cloudflare": "./src/cloudflare.ts"
+  }
+}

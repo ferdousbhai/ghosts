@@ -1,0 +1,16 @@
+{
+  "name": "ghosts",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.27.0",
+  "scripts": {
+    "check": "pnpm typecheck && pnpm test",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260812.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.4"
+  }
+}
