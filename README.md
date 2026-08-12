@@ -7,7 +7,15 @@ This repository makes portable mechanisms inspectable and keeps one tested sourc
 ## Packages
 
 - [`@summonghost/app-tool-cache`](packages/app-tool-cache) — exact-request caching, canonical keys, concurrent-miss coordination, and a Cloudflare Durable Object storage adapter.
+- [`@summonghost/compaction`](packages/compaction) — provider-neutral conversation compaction policy and controller, with an injected xAI adapter.
+- [`@summonghost/context-documents`](packages/context-documents) — bounded Markdown context-document rendering.
+- [`@summonghost/feedback-context`](packages/feedback-context) — provider-neutral message-feedback overlays.
+- [`@summonghost/line-edit`](packages/line-edit) — versioned numbered reads and deterministic snapshot-bound edits.
+- [`@summonghost/memory-contracts`](packages/memory-contracts) — shared `remember`/`forget` schemas and pure relationship-memory mutations.
+- [`@summonghost/research`](packages/research) — standard research contracts, provider normalization, safe public URL reads, and pagination.
 - [`@summonghost/title-generation`](packages/title-generation) — provider-independent title prompts, provisional titles, scheduling heuristics, and output validation.
+- [`@summonghost/tool-discovery`](packages/tool-discovery) — admitted-catalog fuzzy discovery and activation state.
+- [`@summonghost/tool-results`](packages/tool-results) — bounded private result snapshots and Unicode-safe pagination.
 
 Packages are currently consumed from exact Git commit SHAs. They are not published to npm yet.
 

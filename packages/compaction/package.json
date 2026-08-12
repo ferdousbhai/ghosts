@@ -1,0 +1,28 @@
+{
+  "name": "@summonghost/compaction",
+  "version": "0.1.4",
+  "description": "Provider-neutral conversation compaction with an optional xAI adapter",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ferdousbhai/ghosts.git",
+    "directory": "packages/compaction"
+  },
+  "files": ["dist", "src", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./xai": {
+      "types": "./dist/xai.d.ts",
+      "default": "./dist/xai.js"
+    }
+  }
+}

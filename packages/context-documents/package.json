@@ -1,0 +1,24 @@
+{
+  "name": "@summonghost/context-documents",
+  "version": "0.2.0",
+  "description": "Portable Markdown context-document formatting and revision helpers",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ferdousbhai/ghosts.git",
+    "directory": "packages/context-documents"
+  },
+  "files": ["dist", "src", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

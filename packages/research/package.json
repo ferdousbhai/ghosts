@@ -1,0 +1,28 @@
+{
+  "name": "@summonghost/research",
+  "version": "0.4.0",
+  "description": "Portable research contracts, public URL boundaries, pagination, and provider normalization",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ferdousbhai/ghosts.git",
+    "directory": "packages/research"
+  },
+  "files": ["dist", "src", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "ipaddr.js": "^2.2.0",
+    "zod": "^4.0.0"
+  }
+}

@@ -1,0 +1,534 @@
+import { z } from "zod";
+
+export const MAX_RELATIONSHIP_MEMORY_LENGTH = 5_000;
+export const MAX_MEMORY_LINE_LENGTH = 1_000;
+
+export const memoryLineSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_MEMORY_LINE_LENGTH);
+
+/** Canonical model-facing input for adding one relationship memory. */
+export const rememberInputSchema = z.strictObject({
+  content: memoryLineSchema
+    .regex(/^[^\r\n]*$/, "content must be one line")
+    .describe("One concise, standalone fact to save to relationship memory."),
+});
+
+/** Canonical model-facing input for removing or correcting one exact passage. */
+export const forgetInputSchema = z.strictObject({
+  memory: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MAX_RELATIONSHIP_MEMORY_LENGTH)
+    .describe(
+      "A short, unique, exact passage from current relationship memory to remove or correct.",
+    ),
+  correction: memoryLineSchema
+    .regex(/^[^\r\n]*$/, "correction must be one line")
+    .optional()
+    .describe("Corrected standalone fact. Omit to remove the selected passage."),
+});
+
+/** Pure append contract. It contains no application scope. */
+export const relationshipMemoryAppendSchema = z.strictObject({
+  content: z.string().refine((value) => value.trim().length > 0, {
+    message: "content is required",
+  }),
+});
+
+/** Pure exact-text replacement contract. An empty newText removes oldText. */
+export const relationshipMemoryReplaceSchema = z.strictObject({
+  oldText: z.string().refine((value) => value.trim().length > 0, {
+    message: "oldText is required",
+  }),
+  newText: z.string(),
+});
+
+/** Repository/workflow mutation union. */
+export const relationshipMemoryMutationSchema = z.discriminatedUnion("kind", [
+  relationshipMemoryAppendSchema.extend({ kind: z.literal("append") }),
+  relationshipMemoryReplaceSchema.extend({ kind: z.literal("replace") }),
+]);
+
+export type ParsedMemory = string;
+export type RememberInput = z.infer<typeof rememberInputSchema>;
+export type ForgetInput = z.infer<typeof forgetInputSchema>;
+export type RelationshipMemoryAppend = z.infer<
+  typeof relationshipMemoryAppendSchema
+>;
+export type RelationshipMemoryReplace = z.infer<
+  typeof relationshipMemoryReplaceSchema
+>;
+export type RelationshipMemoryMutation = z.infer<
+  typeof relationshipMemoryMutationSchema
+>;
+
+export type RelationshipMemoryDocument = Readonly<{
+  content: string;
+  revision: number;
+}>;
+
+export type RelationshipMemoryMutationResult = Readonly<{
+  content: string;
+  changed: boolean;
+}>;
+
+export type RelationshipMemoryOperation =
+  | Readonly<{
+      kind: "mutate";
+      mutation: RelationshipMemoryMutation;
+    }>
+  | Readonly<{
+      kind: "compact";
+    }>;
+
+export type RelationshipMemoryCommitInput = Readonly<{
+  operationId: string;
+  expectedRevision: number;
+  content: string;
+  compacted: boolean;
+}>;
+
+export type RelationshipMemoryCommitResult =
+  | Readonly<{
+      status: "committed";
+      document: RelationshipMemoryDocument;
+    }>
+  | Readonly<{
+      status: "conflict";
+    }>;
+
+/**
+ * Consumer-supplied persistence port. Implementations own identity, scope,
+ * authorization, storage, and transaction boundaries.
+ */
+export interface RelationshipMemoryRepository {
+  read(): Promise<RelationshipMemoryDocument>;
+  wasOperationApplied(operationId: string): Promise<boolean>;
+  commit(
+    input: RelationshipMemoryCommitInput,
+  ): Promise<RelationshipMemoryCommitResult>;
+}
+
+/** Consumer-supplied model port. Provider selection and billing stay outside. */
+export type RelationshipMemoryCompactor = (input: Readonly<{
+  document: RelationshipMemoryDocument;
+  sourceContent: string;
+  maximumLength: number;
+}>) => Promise<string>;
+
+export type RelationshipMemoryExecutionResult = Readonly<{
+  status: "applied" | "unchanged" | "already_applied";
+  document: RelationshipMemoryDocument;
+  compacted: boolean;
+  attempts: number;
+}>;
+
+export class RelationshipMemoryConflictError extends Error {
+  readonly code = "relationship_memory_conflict" as const;
+
+  constructor(readonly attempts: number) {
+    super(
+      `Relationship memory changed concurrently after ${attempts} attempts`,
+    );
+    this.name = "RelationshipMemoryConflictError";
+  }
+}
+
+export class RelationshipMemoryCapacityError extends Error {
+  readonly code = "relationship_memory_capacity" as const;
+  readonly maxLength = MAX_RELATIONSHIP_MEMORY_LENGTH;
+  readonly requiredReduction: number;
+
+  constructor(
+    readonly currentLength: number,
+    readonly attemptedLength: number,
+  ) {
+    const requiredReduction = Math.max(
+      1,
+      attemptedLength - MAX_RELATIONSHIP_MEMORY_LENGTH + 1,
+    );
+    super(
+      `Relationship memory needs ${requiredReduction} fewer characters before this change can be saved`,
+    );
+    this.name = "RelationshipMemoryCapacityError";
+    this.requiredReduction = requiredReduction;
+  }
+}
+
+export function normalizeMemoryLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+export function parseMemoryBlock(
+  content: string | null | undefined,
+): ParsedMemory[] {
+  const trimmed = content?.trim();
+  if (!trimmed) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed) as unknown;
+  } catch (cause) {
+    if (trimmed.startsWith("[")) {
+      throw new Error("Invalid legacy JSON memory block", { cause });
+    }
+    // Plain text is the normal writable-context format.
+  }
+  if (Array.isArray(parsed)) {
+    return mergeMemoryEntries(
+      parsed.map((item, index) => {
+        const line = parseJsonMemoryItem(item);
+        if (!line) {
+          throw new Error(`Invalid legacy JSON memory item at index ${index}`);
+        }
+        return line;
+      }),
+      [],
+    );
+  }
+
+  return mergeMemoryEntries(
+    trimmed
+      .split(/\r?\n/)
+      .map((rawLine) =>
+        rawLine
+          .trim()
+          .replace(/^[-*]\s+/, "")
+          .trim(),
+      )
+      .filter((line) => line && !line.startsWith("#")),
+    [],
+  );
+}
+
+export function mergeMemoryEntries(
+  current: ParsedMemory[],
+  next: ParsedMemory[],
+): ParsedMemory[] {
+  const merged = new Map<string, string>();
+  for (const line of [...current, ...next]) {
+    const normalized = normalizeMemoryLine(line);
+    if (!normalized) continue;
+    merged.set(normalized.toLowerCase(), normalized);
+  }
+  return [...merged.values()];
+}
+
+export function formatMemoryLines(lines: readonly string[]): string {
+  return lines.map((line) => `- ${normalizeMemoryLine(line)}`).join("\n");
+}
+
+export function normalizeRelationshipMemoryDocument(content: string): string {
+  return content
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trim();
+}
+
+export function shouldCompactRelationshipMemory(content: string): boolean {
+  return content.length >= MAX_RELATIONSHIP_MEMORY_LENGTH;
+}
+
+export function assertRelationshipMemoryLength(content: string): void {
+  if (content.length > MAX_RELATIONSHIP_MEMORY_LENGTH) {
+    throw new Error(
+      `Relationship memory must be ${MAX_RELATIONSHIP_MEMORY_LENGTH} characters or fewer`,
+    );
+  }
+}
+
+export function assertExpectedRelationshipMemoryRevision(
+  document: Pick<RelationshipMemoryDocument, "revision">,
+  expected: number,
+): void {
+  if (document.revision !== expected) {
+    throw new Error(
+      `Memory revision conflict: expected ${expected}, actual ${document.revision}; read memory and retry`,
+    );
+  }
+}
+
+export function containsExactMemoryBlock(
+  content: string,
+  block: string,
+): boolean {
+  if (!block) return false;
+  let offset = 0;
+  while (true) {
+    const index = content.indexOf(block, offset);
+    if (index < 0) return false;
+    const startsAtBoundary = index === 0 || content[index - 1] === "\n";
+    const end = index + block.length;
+    const endsAtBoundary = end === content.length || content[end] === "\n";
+    if (startsAtBoundary && endsAtBoundary) return true;
+    offset = index + block.length;
+  }
+}
+
+export function countMemoryOccurrences(content: string, value: string): number {
+  if (!value) return 0;
+  let count = 0;
+  let offset = 0;
+  while (true) {
+    const index = content.indexOf(value, offset);
+    if (index < 0) return count;
+    count += 1;
+    offset = index + 1;
+  }
+}
+
+/** Apply append semantics without persistence or application policy. */
+export function appendRelationshipMemory(
+  currentContent: string,
+  append: RelationshipMemoryAppend,
+): RelationshipMemoryMutationResult {
+  const current = normalizeRelationshipMemoryDocument(currentContent);
+  const appended = normalizeRelationshipMemoryDocument(append.content);
+  if (!appended) throw new Error("Memory content is required");
+  if (containsExactMemoryBlock(current, appended)) {
+    return { content: current, changed: false };
+  }
+  return {
+    content: current ? `${current}\n${appended}` : appended,
+    changed: true,
+  };
+}
+
+/** Apply unique exact-text replacement without persistence or app policy. */
+export function replaceRelationshipMemory(
+  currentContent: string,
+  replacement: RelationshipMemoryReplace,
+  options: Readonly<{ allowAlreadyApplied?: boolean }> = {},
+): RelationshipMemoryMutationResult {
+  const current = normalizeRelationshipMemoryDocument(currentContent);
+  const oldText = normalizeLineEndings(replacement.oldText).trim();
+  if (!oldText) throw new Error("old_text is required");
+  const occurrences = countMemoryOccurrences(current, oldText);
+  if (occurrences === 0) {
+    const newText = normalizeLineEndings(replacement.newText).trim();
+    const alreadyApplied =
+      options.allowAlreadyApplied === true &&
+      (!newText || countMemoryOccurrences(current, newText) > 0);
+    if (alreadyApplied) return { content: current, changed: false };
+    throw new Error("Memory text was not found; read memory and retry");
+  }
+  if (occurrences > 1) {
+    throw new Error("Memory text is not unique; use a larger exact selection");
+  }
+
+  const newText = normalizeLineEndings(replacement.newText).trim();
+  const content = normalizeRelationshipMemoryDocument(
+    current.replace(oldText, newText),
+  );
+  return { content, changed: content !== current };
+}
+
+export function applyRelationshipMemoryMutation(
+  currentContent: string,
+  mutation: RelationshipMemoryMutation,
+  options: Readonly<{ allowAlreadyApplied?: boolean }> = {},
+): RelationshipMemoryMutationResult {
+  return mutation.kind === "append"
+    ? appendRelationshipMemory(currentContent, mutation)
+    : replaceRelationshipMemory(currentContent, mutation, options);
+}
+
+export function formatRelationshipMemoryContext(
+  content: string,
+): string | null {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+  assertRelationshipMemoryLength(trimmed);
+  return [
+    "<relationship_memory>",
+    escapeXml(trimmed),
+    "</relationship_memory>",
+  ].join("\n");
+}
+
+export function validateRelationshipMemoryCompaction(input: Readonly<{
+  sourceContent: string;
+  compactedContent: string;
+}>): string {
+  const sourceContent = normalizeRelationshipMemoryDocument(
+    input.sourceContent,
+  );
+  if (!sourceContent) {
+    throw new Error("Cannot compact an empty relationship-memory document");
+  }
+
+  const compactedContent = normalizeRelationshipMemoryDocument(
+    input.compactedContent,
+  );
+  if (!compactedContent) {
+    throw new Error(
+      "Relationship-memory compaction returned an empty document",
+    );
+  }
+  if (shouldCompactRelationshipMemory(compactedContent)) {
+    throw new Error(
+      `Relationship-memory compaction must return fewer than ${MAX_RELATIONSHIP_MEMORY_LENGTH} characters`,
+    );
+  }
+  if (compactedContent.length >= sourceContent.length) {
+    throw new Error(
+      "Relationship-memory compaction did not shorten the document",
+    );
+  }
+  return compactedContent;
+}
+
+/**
+ * Execute the repository-neutral relationship-memory state machine.
+ *
+ * Consumers own identity/scope, authorization, persistence, billing, model
+ * execution, background dispatch, and telemetry. This function owns mutation
+ * semantics, replay detection, compaction validation, and optimistic retries.
+ */
+export async function executeRelationshipMemoryOperation(input: Readonly<{
+  repository: RelationshipMemoryRepository;
+  operationId: string;
+  operation: RelationshipMemoryOperation;
+  compactor?: RelationshipMemoryCompactor;
+  maxAttempts?: number;
+}>): Promise<RelationshipMemoryExecutionResult> {
+  const operationId = input.operationId.trim();
+  if (!operationId) {
+    throw new Error("Relationship-memory operation ID is required");
+  }
+
+  const maxAttempts = input.maxAttempts ?? 4;
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) {
+    throw new Error(
+      "Relationship-memory max attempts must be a positive integer",
+    );
+  }
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (await input.repository.wasOperationApplied(operationId)) {
+      return {
+        status: "already_applied",
+        document: await input.repository.read(),
+        compacted: false,
+        attempts: attempt,
+      };
+    }
+
+    const document = await input.repository.read();
+    // Close the check/read race before interpreting an already-mutated snapshot.
+    if (await input.repository.wasOperationApplied(operationId)) {
+      return {
+        status: "already_applied",
+        document: await input.repository.read(),
+        compacted: false,
+        attempts: attempt,
+      };
+    }
+    const mutationResult =
+      input.operation.kind === "mutate"
+        ? applyRelationshipMemoryMutation(
+            document.content,
+            input.operation.mutation,
+          )
+        : { content: document.content, changed: false };
+
+    let content = mutationResult.content;
+    let compacted = false;
+    if (shouldCompactRelationshipMemory(content)) {
+      if (!input.compactor) {
+        throw new RelationshipMemoryCapacityError(
+          document.content.length,
+          content.length,
+        );
+      }
+      content = validateRelationshipMemoryCompaction({
+        sourceContent: content,
+        compactedContent: await input.compactor({
+          document,
+          sourceContent: content,
+          maximumLength: MAX_RELATIONSHIP_MEMORY_LENGTH - 1,
+        }),
+      });
+      compacted = true;
+    }
+
+    if (!mutationResult.changed && !compacted) {
+      if (await input.repository.wasOperationApplied(operationId)) {
+        return {
+          status: "already_applied",
+          document: await input.repository.read(),
+          compacted: false,
+          attempts: attempt,
+        };
+      }
+      return {
+        status: "unchanged",
+        document,
+        compacted: false,
+        attempts: attempt,
+      };
+    }
+
+    const commit = await input.repository.commit({
+      operationId,
+      expectedRevision: document.revision,
+      content,
+      compacted,
+    });
+    if (commit.status === "committed") {
+      return {
+        status: "applied",
+        document: commit.document,
+        compacted,
+        attempts: attempt,
+      };
+    }
+  }
+
+  if (await input.repository.wasOperationApplied(operationId)) {
+    return {
+      status: "already_applied",
+      document: await input.repository.read(),
+      compacted: false,
+      attempts: maxAttempts,
+    };
+  }
+  throw new RelationshipMemoryConflictError(maxAttempts);
+}
+
+function parseJsonMemoryItem(item: unknown): string | null {
+  if (typeof item === "string") return normalizeMemoryLine(item);
+
+  const objectEntry = z
+    .object({
+      key: z.string().trim().min(1).optional(),
+      value: z.string().trim().min(1),
+    })
+    .safeParse(item);
+  if (!objectEntry.success) return null;
+
+  return normalizeMemoryLine(
+    objectEntry.data.key
+      ? `${objectEntry.data.key}: ${objectEntry.data.value}`
+      : objectEntry.data.value,
+  );
+}
+
+function normalizeLineEndings(content: string): string {
+  return content.replace(/\r\n?/g, "\n");
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}

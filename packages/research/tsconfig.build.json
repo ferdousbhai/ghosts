@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": [
+    "src/index.ts",
+    "src/contracts.ts",
+    "src/exa-search.ts",
+    "src/pagination.ts",
+    "src/public-url.ts",
+    "src/reddit.ts",
+    "src/results.ts",
+    "src/tool-names.ts",
+    "src/x-search.ts"
+  ]
+}

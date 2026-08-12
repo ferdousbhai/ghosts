@@ -1,0 +1,24 @@
+{
+  "name": "@summonghost/line-edit",
+  "version": "0.1.0",
+  "description": "Pure numbered-read, snapshot-version, and line-edit mechanics",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ferdousbhai/ghosts.git",
+    "directory": "packages/line-edit"
+  },
+  "files": ["dist", "src", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

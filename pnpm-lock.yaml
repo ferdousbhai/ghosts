@@ -20,7 +20,34 @@ importers:
 
   packages/app-tool-cache: {}
 
+  packages/compaction: {}
+
+  packages/context-documents: {}
+
+  packages/feedback-context: {}
+
+  packages/line-edit: {}
+
+  packages/memory-contracts:
+    dependencies:
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+
+  packages/research:
+    dependencies:
+      ipaddr.js:
+        specifier: ^2.2.0
+        version: 2.5.0
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+
   packages/title-generation: {}
+
+  packages/tool-discovery: {}
+
+  packages/tool-results: {}
 
 packages:
 
@@ -199,6 +226,10 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  ipaddr.js@2.5.0:
+    resolution: {integrity: sha512-aq+t5NAc+cS6rZQQVWC2x98CPqGtKKTMDd4Gaodv0wShnItdKg/51djkGJ1hqH+Oy0ivDftCbSLCQob8zso01w==}
+    engines: {node: '>= 10'}
 
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
@@ -423,6 +454,9 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+
 snapshots:
 
   '@cloudflare/workers-types@5.20260812.1': {}
@@ -549,6 +583,8 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  ipaddr.js@2.5.0: {}
 
   lightningcss-android-arm64@1.33.0:
     optional: true
@@ -699,3 +735,5 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  zod@4.4.3: {}

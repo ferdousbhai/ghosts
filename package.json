@@ -5,9 +5,9 @@
   "packageManager": "pnpm@10.27.0",
   "scripts": {
     "build": "pnpm --recursive build",
-    "check": "pnpm build && pnpm typecheck && pnpm test && pnpm check:dist",
+    "check": "pnpm build && pnpm typecheck && pnpm test && pnpm check:dist && pnpm check:exports",
     "check:dist": "git diff --exit-code -- packages/*/dist",
-    "check:exports": "node -e \"Promise.all([import('./packages/app-tool-cache/dist/index.js'),import('./packages/app-tool-cache/dist/cloudflare.js'),import('./packages/title-generation/dist/index.js')])\"",
+    "check:exports": "node -e \"const fs=require('node:fs');Promise.all(fs.readdirSync('packages').flatMap(p=>fs.existsSync('packages/'+p+'/dist')?fs.readdirSync('packages/'+p+'/dist').filter(f=>f.endsWith('.js')).map(f=>import('./packages/'+p+'/dist/'+f)):[]))\"",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

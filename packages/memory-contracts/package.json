@@ -1,0 +1,27 @@
+{
+  "name": "@summonghost/memory-contracts",
+  "version": "0.1.0",
+  "description": "Application-neutral relationship-memory schemas and state machine",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ferdousbhai/ghosts.git",
+    "directory": "packages/memory-contracts"
+  },
+  "files": ["dist", "src", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
+  }
+}
