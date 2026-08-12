@@ -14,6 +14,7 @@ export declare function appToolCacheDurableObject<Base extends DurableObjectBase
     "__#private@#pending": PendingValue | null;
     get "__#private@#cacheStorage"(): DurableObjectStorage;
     getOrReserve(): Promise<AppToolCacheReservation>;
+    renew(lease: string): Promise<boolean>;
     fulfill(lease: string, value: string, persist: boolean): Promise<boolean>;
     release(lease: string): Promise<void>;
     remove(value: string): Promise<void>;

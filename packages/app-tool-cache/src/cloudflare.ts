@@ -88,6 +88,20 @@ export function appToolCacheDurableObject<
     return { lease, status: "leader" };
   }
 
+  async renew(lease: string): Promise<boolean> {
+    const now = Date.now();
+    const expiresAt = now + APP_TOOL_CACHE_LEASE_TTL_MS;
+    return await this.#cacheStorage.transaction(async (transaction) => {
+      const storedLease = await transaction.get<StoredLease>(LEASE_KEY);
+      if (storedLease?.lease !== lease || storedLease.expiresAt <= now) {
+        return false;
+      }
+      await transaction.put<StoredLease>(LEASE_KEY, { expiresAt, lease });
+      await transaction.setAlarm(expiresAt);
+      return true;
+    });
+  }
+
   async fulfill(
     lease: string,
     value: string,

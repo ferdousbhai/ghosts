@@ -53,6 +53,19 @@ export function appToolCacheDurableObject(DurableObjectBaseClass) {
             this.#ensurePending({ expiresAt, lease });
             return { lease, status: "leader" };
         }
+        async renew(lease) {
+            const now = Date.now();
+            const expiresAt = now + APP_TOOL_CACHE_LEASE_TTL_MS;
+            return await this.#cacheStorage.transaction(async (transaction) => {
+                const storedLease = await transaction.get(LEASE_KEY);
+                if (storedLease?.lease !== lease || storedLease.expiresAt <= now) {
+                    return false;
+                }
+                await transaction.put(LEASE_KEY, { expiresAt, lease });
+                await transaction.setAlarm(expiresAt);
+                return true;
+            });
+        }
         async fulfill(lease, value, persist) {
             const storedLease = await this.#cacheStorage.get(LEASE_KEY);
             if (storedLease?.lease !== lease

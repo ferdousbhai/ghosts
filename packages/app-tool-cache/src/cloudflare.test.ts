@@ -132,6 +132,36 @@ describe("app-wide tool cache entry", () => {
     await expect(follower).resolves.toEqual({ status: "hit", value: '"once"' });
   });
 
+  it("atomically renews the matching live lease and its alarm", async () => {
+    const storage = createStorage();
+    const cache = entry(storage);
+    const reservation = await cache.getOrReserve();
+    expect(reservation.status).toBe("leader");
+    if (reservation.status !== "leader") return;
+    const follower = cache.getOrReserve();
+
+    const renewedAt = now.getTime() + 20_000;
+    vi.setSystemTime(renewedAt);
+    const transaction = vi.spyOn(storage, "transaction");
+    await expect(cache.renew(reservation.lease)).resolves.toBe(true);
+    expect(transaction).toHaveBeenCalledOnce();
+    await expect(storage.getAlarm()).resolves.toBe(
+      renewedAt + APP_TOOL_CACHE_LEASE_TTL_MS,
+    );
+    await expect(storage.get<{ expiresAt: number }>("lease")).resolves.toMatchObject({
+      expiresAt: renewedAt + APP_TOOL_CACHE_LEASE_TTL_MS,
+    });
+
+    vi.setSystemTime(now.getTime() + APP_TOOL_CACHE_LEASE_TTL_MS);
+    await cache.alarm();
+    await expect(Promise.race([follower, Promise.resolve("pending")]))
+      .resolves.toBe("pending");
+
+    vi.setSystemTime(renewedAt + APP_TOOL_CACHE_LEASE_TTL_MS);
+    await cache.alarm();
+    await expect(follower).resolves.toEqual({ status: "retry" });
+  });
+
   it("keeps the five-minute result TTL independent from the lease", async () => {
     expect(APP_TOOL_CACHE_LEASE_TTL_MS).toBeLessThan(APP_TOOL_CACHE_TTL_MS);
     const storage = createStorage();
@@ -168,6 +198,7 @@ describe("app-wide tool cache entry", () => {
       .resolves.toBe("pending");
 
     vi.setSystemTime(now.getTime() + APP_TOOL_CACHE_LEASE_TTL_MS);
+    await expect(cache.renew(reservation.lease)).resolves.toBe(false);
     await cache.alarm();
 
     await expect(follower).resolves.toEqual({ status: "retry" });

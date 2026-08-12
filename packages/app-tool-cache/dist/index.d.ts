@@ -1,8 +1,8 @@
 /** How long a successfully persisted provider result remains reusable. */
 export declare const APP_TOOL_CACHE_TTL_MS: number;
 /**
- * Maximum lifetime of a miss-coordination lease. Provider requests should
- * complete or release their lease within this window.
+ * Renewal window for a miss-coordination lease. Active leaders extend their
+ * lease within this window; abandoned leases expire after it.
  */
 export declare const APP_TOOL_CACHE_LEASE_TTL_MS = 30000;
 export declare const APP_TOOL_CACHE_MAX_BYTES = 1900000;
@@ -20,6 +20,7 @@ export interface AppToolCacheEntryRpc {
     getOrReserve(): Promise<AppToolCacheReservation>;
     release(lease: string): Promise<void>;
     remove(value: string): Promise<void>;
+    renew(lease: string): Promise<boolean>;
 }
 export interface AppToolCacheNamespace {
     getByName(name: string): AppToolCacheEntryRpc;

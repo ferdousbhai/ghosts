@@ -1,8 +1,8 @@
 /** How long a successfully persisted provider result remains reusable. */
 export const APP_TOOL_CACHE_TTL_MS = 5 * 60_000;
 /**
- * Maximum lifetime of a miss-coordination lease. Provider requests should
- * complete or release their lease within this window.
+ * Renewal window for a miss-coordination lease. Active leaders extend their
+ * lease within this window; abandoned leases expire after it.
  */
 export const APP_TOOL_CACHE_LEASE_TTL_MS = 30_000;
 export const APP_TOOL_CACHE_MAX_BYTES = 1_900_000;
@@ -64,40 +64,50 @@ export function createAppToolCache(namespace) {
                 }
                 if (reservation.status === "retry")
                     continue;
-                let loaded;
+                const stopHeartbeat = startLeaseHeartbeat(entry, reservation.lease);
                 try {
-                    loaded = await input.load();
-                }
-                catch (error) {
-                    await entry.release(reservation.lease).catch(() => { });
-                    throw error;
-                }
-                let value;
-                try {
-                    value = JSON.stringify(loaded);
-                }
-                catch {
-                    await entry.release(reservation.lease).catch(() => { });
+                    let loaded;
+                    try {
+                        loaded = await waitForSignal(input.load(), input.signal);
+                    }
+                    catch (error) {
+                        stopHeartbeat();
+                        await entry.release(reservation.lease).catch(() => { });
+                        throw error;
+                    }
+                    let value;
+                    try {
+                        value = JSON.stringify(loaded);
+                    }
+                    catch {
+                        stopHeartbeat();
+                        await entry.release(reservation.lease).catch(() => { });
+                        return loaded;
+                    }
+                    if (value === undefined) {
+                        stopHeartbeat();
+                        await entry.release(reservation.lease).catch(() => { });
+                        return loaded;
+                    }
+                    let persist = true;
+                    try {
+                        persist = input.shouldCache?.(loaded) ?? true;
+                    }
+                    catch {
+                        persist = false;
+                    }
+                    stopHeartbeat();
+                    try {
+                        await entry.fulfill(reservation.lease, value, persist);
+                    }
+                    catch {
+                        await entry.release(reservation.lease).catch(() => { });
+                    }
                     return loaded;
                 }
-                if (value === undefined) {
-                    await entry.release(reservation.lease).catch(() => { });
-                    return loaded;
+                finally {
+                    stopHeartbeat();
                 }
-                let persist = true;
-                try {
-                    persist = input.shouldCache?.(loaded) ?? true;
-                }
-                catch {
-                    persist = false;
-                }
-                try {
-                    await entry.fulfill(reservation.lease, value, persist);
-                }
-                catch {
-                    await entry.release(reservation.lease).catch(() => { });
-                }
-                return loaded;
             }
             input.signal?.throwIfAborted();
             return input.load();
@@ -156,6 +166,28 @@ function isPlainRecord(value) {
         return false;
     const prototype = Object.getPrototypeOf(value);
     return prototype === Object.prototype || prototype === null;
+}
+function startLeaseHeartbeat(entry, lease) {
+    let stopped = false;
+    let timer;
+    const schedule = () => {
+        if (stopped)
+            return;
+        timer = setTimeout(() => {
+            timer = undefined;
+            void entry.renew(lease).then((renewed) => {
+                if (renewed)
+                    schedule();
+            }, () => schedule());
+        }, APP_TOOL_CACHE_LEASE_TTL_MS / 2);
+    };
+    schedule();
+    return () => {
+        stopped = true;
+        if (timer !== undefined)
+            clearTimeout(timer);
+        timer = undefined;
+    };
 }
 async function waitForSignal(promise, signal) {
     signal?.throwIfAborted();
