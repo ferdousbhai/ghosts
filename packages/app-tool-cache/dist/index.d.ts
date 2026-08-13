@@ -15,8 +15,15 @@ export type AppToolCacheReservation = Readonly<{
 }> | Readonly<{
     status: "retry";
 }>;
+export type AppToolCacheFulfillment = Readonly<{
+    accepted: false;
+    persisted: false;
+}> | Readonly<{
+    accepted: true;
+    persisted: boolean;
+}>;
 export interface AppToolCacheEntryRpc {
-    fulfill(lease: string, value: string, persist: boolean): Promise<boolean>;
+    fulfill(lease: string, value: string, persist: boolean): Promise<AppToolCacheFulfillment>;
     getOrReserve(): Promise<AppToolCacheReservation>;
     release(lease: string): Promise<void>;
     remove(value: string): Promise<void>;

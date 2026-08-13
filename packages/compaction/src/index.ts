@@ -105,6 +105,8 @@ export function createConversationCompactionController<
   let nextSequence = 0;
   let pendingSequence: number | null = null;
   let branchRevision = 0;
+  let observedRevision = 0;
+  let completedBackgroundRevision: number | null = null;
   let preparationTail: Promise<void> = Promise.resolve();
 
   const prepareMessagesOnce = async (
@@ -121,9 +123,11 @@ export function createConversationCompactionController<
       latestSnapshot = null;
       pendingSequence = null;
       branchRevision += 1;
+      observedRevision += 1;
     } else if (fullMessages.length > observedMessages.length) {
       effectiveMessages.push(...fullMessages.slice(observedMessages.length));
       observedMessages = [...fullMessages];
+      observedRevision += 1;
     }
 
     const inputTokens = nonNegativeInteger(
@@ -135,7 +139,9 @@ export function createConversationCompactionController<
     );
     const action = decideConversationCompaction({
       estimatedTokens: inputTokens,
-      pending: pendingSequence !== null,
+      pending:
+        pendingSequence !== null ||
+        completedBackgroundRevision === observedRevision,
       policy: options.policy,
     });
     if (action === "none") return [...effectiveMessages];
@@ -148,6 +154,7 @@ export function createConversationCompactionController<
     if (action === "blocking") pendingSequence = null;
     const sourceMessages = [...effectiveMessages];
     const sourceBranchRevision = branchRevision;
+    const sourceObservedRevision = observedRevision;
     const createSnapshot = async (): Promise<Snapshot> => {
       if (
         sourceBranchRevision !== branchRevision ||
@@ -172,25 +179,29 @@ export function createConversationCompactionController<
 
     if (action === "background" && options.scheduleCompaction) {
       pendingSequence = sequence;
-      const run = async (): Promise<Snapshot> => {
-        if (
-          sourceBranchRevision !== branchRevision ||
-          sequence !== nextSequence
-        ) {
-          throw new ConversationCompactionSupersededError();
-        }
-        pendingSequence = sequence;
-        try {
-          return await createSnapshot();
-        } catch (error) {
-          if (pendingSequence === sequence) pendingSequence = null;
-          throw error;
-        }
+      let runPromise: Promise<Snapshot> | null = null;
+      let schedulingFailed = false;
+      const run = (): Promise<Snapshot> => {
+        runPromise ??= createSnapshot()
+          .then((snapshot) => {
+            if (!schedulingFailed) {
+              completedBackgroundRevision = sourceObservedRevision;
+            }
+            return snapshot;
+          })
+          .finally(() => {
+            if (pendingSequence === sequence) pendingSequence = null;
+          });
+        return runPromise;
       };
       try {
         await options.scheduleCompaction({ run, sequence });
       } catch (error) {
+        schedulingFailed = true;
         if (pendingSequence === sequence) pendingSequence = null;
+        if (completedBackgroundRevision === sourceObservedRevision) {
+          completedBackgroundRevision = null;
+        }
         throw error;
       }
       return [...effectiveMessages];

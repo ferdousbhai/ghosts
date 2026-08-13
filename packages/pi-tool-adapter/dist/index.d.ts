@@ -1,6 +1,9 @@
 export type Awaitable<T> = T | PromiseLike<T>;
-/** A JSON Schema object accepted structurally by Pi without importing Pi or TypeBox. */
-export type Draft07JsonSchema = Readonly<Record<string, unknown>>;
+export type Draft07SchemaIdentifier = "http://json-schema.org/draft-07/schema" | "http://json-schema.org/draft-07/schema#" | "https://json-schema.org/draft-07/schema" | "https://json-schema.org/draft-07/schema#";
+/** A structural JSON Schema that explicitly declares Draft-07. */
+export type Draft07JsonSchema = Readonly<Record<string, unknown> & {
+    $schema: Draft07SchemaIdentifier;
+}>;
 export type PiTextContent = {
     type: "text";
     text: string;

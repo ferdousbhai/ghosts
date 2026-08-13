@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   MAX_RELATIONSHIP_MEMORY_LENGTH,
   RelationshipMemoryCapacityError,
@@ -208,7 +208,14 @@ describe("@summonghost/memory-contracts", () => {
     )).toBe(false);
     expect(shouldCompactRelationshipMemory(
       "x".repeat(MAX_RELATIONSHIP_MEMORY_LENGTH),
+    )).toBe(false);
+    expect(shouldCompactRelationshipMemory(
+      "x".repeat(MAX_RELATIONSHIP_MEMORY_LENGTH + 1),
     )).toBe(true);
+    expect(validateRelationshipMemoryCompaction({
+      sourceContent: "x".repeat(MAX_RELATIONSHIP_MEMORY_LENGTH + 1),
+      compactedContent: "x".repeat(MAX_RELATIONSHIP_MEMORY_LENGTH),
+    })).toHaveLength(MAX_RELATIONSHIP_MEMORY_LENGTH);
     expect(validateRelationshipMemoryCompaction({
       sourceContent: "- Likes tea.\n- Likes tea.",
       compactedContent: "- Likes tea.",
@@ -224,7 +231,7 @@ describe("@summonghost/memory-contracts", () => {
     );
     expect(error).toMatchObject({
       code: "relationship_memory_capacity",
-      requiredReduction: 2,
+      requiredReduction: 1,
       maxLength: MAX_RELATIONSHIP_MEMORY_LENGTH,
     });
   });
@@ -282,6 +289,37 @@ describe("@summonghost/memory-contracts", () => {
     expect(compactorCalls).toBe(0);
   });
 
+  it("commits a document exactly at the inclusive maximum without compaction", async () => {
+    const content = "x".repeat(MAX_RELATIONSHIP_MEMORY_LENGTH);
+    const repository = memoryRepository("");
+    const compactor = vi.fn(async () => "compacted");
+
+    await expect(executeRelationshipMemoryOperation({
+      repository,
+      operationId: "remember-at-maximum",
+      operation: {
+        kind: "mutate",
+        mutation: { kind: "append", content },
+      },
+      compactor,
+    })).resolves.toMatchObject({
+      status: "applied",
+      compacted: false,
+      document: { content },
+    });
+    await expect(executeRelationshipMemoryOperation({
+      repository,
+      operationId: "compact-at-maximum",
+      operation: { kind: "compact" },
+      compactor,
+    })).resolves.toMatchObject({
+      status: "unchanged",
+      compacted: false,
+      document: { content },
+    });
+    expect(compactor).not.toHaveBeenCalled();
+  });
+
   it("executes mutation and compaction through consumer-owned ports", async () => {
     const repository = memoryRepository(
       "x".repeat(MAX_RELATIONSHIP_MEMORY_LENGTH - 5),
@@ -298,7 +336,7 @@ describe("@summonghost/memory-contracts", () => {
           content: "x".repeat(MAX_RELATIONSHIP_MEMORY_LENGTH - 5),
           revision: 1,
         });
-        expect(maximumLength).toBe(MAX_RELATIONSHIP_MEMORY_LENGTH - 1);
+        expect(maximumLength).toBe(MAX_RELATIONSHIP_MEMORY_LENGTH);
         expect(sourceContent).toContain("new preference");
         return "Condensed preferences including the new preference.";
       },

@@ -5,12 +5,17 @@ export type ContextDocument = Readonly<{
     markdown: string;
     revision: string | number;
 }>;
+/** Hard limits for strings emitted into model context. */
+export declare const CONTEXT_DOCUMENT_LIMITS: Readonly<{
+    documents: 100;
+    outputCharacters: 256000;
+}>;
 export type RevisionedDraftReconciliation = Readonly<{
     draft: string;
     conflict: boolean;
     replaceEditorContent: boolean;
 }>;
-/** Normalize harmless Markdown formatting without changing its meaning. */
+/** Normalize harmless Markdown formatting without changing fenced code. */
 export declare function normalizeMarkdown(content: string): string;
 export declare function extractMarkdownTitle(content: string, fallback: string): string;
 export declare function extractMarkdownTitle(content: string, fallback?: string): string | null;

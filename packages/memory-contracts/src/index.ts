@@ -164,7 +164,7 @@ export class RelationshipMemoryCapacityError extends Error {
   ) {
     const requiredReduction = Math.max(
       1,
-      attemptedLength - MAX_RELATIONSHIP_MEMORY_LENGTH + 1,
+      attemptedLength - MAX_RELATIONSHIP_MEMORY_LENGTH,
     );
     super(
       `Relationship memory needs ${requiredReduction} fewer characters before this change can be saved`,
@@ -247,7 +247,7 @@ export function normalizeRelationshipMemoryDocument(content: string): string {
 }
 
 export function shouldCompactRelationshipMemory(content: string): boolean {
-  return content.length >= MAX_RELATIONSHIP_MEMORY_LENGTH;
+  return content.length > MAX_RELATIONSHIP_MEMORY_LENGTH;
 }
 
 export function assertRelationshipMemoryLength(content: string): void {
@@ -388,7 +388,7 @@ export function validateRelationshipMemoryCompaction(input: Readonly<{
   }
   if (shouldCompactRelationshipMemory(compactedContent)) {
     throw new Error(
-      `Relationship-memory compaction must return fewer than ${MAX_RELATIONSHIP_MEMORY_LENGTH} characters`,
+      `Relationship-memory compaction must return ${MAX_RELATIONSHIP_MEMORY_LENGTH} characters or fewer`,
     );
   }
   if (compactedContent.length >= sourceContent.length) {
@@ -466,7 +466,7 @@ export async function executeRelationshipMemoryOperation(input: Readonly<{
         compactedContent: await input.compactor({
           document,
           sourceContent: content,
-          maximumLength: MAX_RELATIONSHIP_MEMORY_LENGTH - 1,
+          maximumLength: MAX_RELATIONSHIP_MEMORY_LENGTH,
         }),
       });
       compacted = true;

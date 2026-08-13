@@ -3,6 +3,7 @@ import {
   APP_TOOL_CACHE_LEASE_TTL_MS,
   createAppToolCache,
   type AppToolCacheEntryRpc,
+  type AppToolCacheFulfillment,
   type AppToolCacheReservation,
 } from "./index";
 
@@ -30,15 +31,17 @@ class FakeEntry implements AppToolCacheEntryRpc {
     lease: string,
     value: string,
     persist: boolean,
-  ): Promise<boolean> {
-    if (lease !== this.lease || this.leaseExpiresAt <= Date.now()) return false;
+  ): Promise<AppToolCacheFulfillment> {
+    if (lease !== this.lease || this.leaseExpiresAt <= Date.now()) {
+      return { accepted: false, persisted: false };
+    }
     if (persist) this.value = value;
     this.lease = null;
     this.leaseExpiresAt = 0;
     for (const resolve of this.waiters.splice(0)) {
       resolve({ status: "hit", value });
     }
-    return persist;
+    return { accepted: true, persisted: persist };
   }
 
   async release(lease: string): Promise<void> {
@@ -58,6 +61,10 @@ class FakeEntry implements AppToolCacheEntryRpc {
     return true;
   }
 
+  getWaiterCountForTest(): number {
+    return this.waiters.length;
+  }
+
   setValueForTest(value: string): void {
     this.value = value;
   }
@@ -74,6 +81,7 @@ function harness() {
   });
   return {
     cache: createAppToolCache({ getByName }),
+    entries,
     getByName,
   };
 }
@@ -182,8 +190,12 @@ describe("app-wide tool cache client", () => {
         new Error("renewal unavailable"),
       );
 
-      await vi.advanceTimersByTimeAsync(APP_TOOL_CACHE_LEASE_TTL_MS * 1.5);
-      expect(renew).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersToNextTimerAsync();
+      expect(renew).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersToNextTimerAsync();
+      expect(renew).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
       finish("provider result");
       await expect(successful).resolves.toBe("provider result");
       expect(vi.getTimerCount()).toBe(0);
@@ -212,8 +224,159 @@ describe("app-wide tool cache client", () => {
     }
   });
 
+  it("discards a provider result after renewal reports leadership loss", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-09T12:00:00.000Z"));
+    let finish!: (value: string) => void;
+    let finishRenewal!: (renewed: boolean) => void;
+    try {
+      const provider = new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+      const renewal = new Promise<boolean>((resolve) => {
+        finishRenewal = resolve;
+      });
+      const entry: AppToolCacheEntryRpc = {
+        fulfill: vi.fn(async () => ({ accepted: true, persisted: true } as const)),
+        getOrReserve: vi.fn()
+          .mockResolvedValueOnce({ lease: "old-lease", status: "leader" })
+          .mockResolvedValueOnce({ status: "hit", value: '"winner"' }),
+        release: vi.fn(async () => {}),
+        remove: vi.fn(async () => {}),
+        renew: vi.fn(() => renewal),
+      };
+      const cache = createAppToolCache({ getByName: () => entry });
+      const load = vi.fn(() => provider);
+      const result = cache.getOrLoad({
+        namespace: "leadership-loss:v1",
+        params: { id: 1 },
+        load,
+      });
+      await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
+
+      await vi.advanceTimersByTimeAsync(APP_TOOL_CACHE_LEASE_TTL_MS / 2);
+      expect(entry.renew).toHaveBeenCalledOnce();
+      finish("stale provider result");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(entry.fulfill).not.toHaveBeenCalled();
+      await expect(Promise.race([result, Promise.resolve("pending")]))
+        .resolves.toBe("pending");
+
+      finishRenewal(false);
+      await expect(result).resolves.toBe("winner");
+      expect(entry.fulfill).not.toHaveBeenCalled();
+      expect(entry.getOrReserve).toHaveBeenCalledTimes(2);
+      expect(load).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds an unresolved renewal at the lease deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-09T12:00:00.000Z"));
+    let finish!: (value: string) => void;
+    try {
+      const provider = new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+      const entry: AppToolCacheEntryRpc = {
+        fulfill: vi.fn(async () => ({ accepted: true, persisted: true } as const)),
+        getOrReserve: vi.fn()
+          .mockResolvedValueOnce({ lease: "uncertain-lease", status: "leader" })
+          .mockResolvedValueOnce({ status: "hit", value: '"winner"' }),
+        release: vi.fn(async () => {}),
+        remove: vi.fn(async () => {}),
+        renew: vi.fn(() => new Promise<boolean>(() => {})),
+      };
+      const cache = createAppToolCache({ getByName: () => entry });
+      const result = cache.getOrLoad({
+        namespace: "unresolved-renewal:v1",
+        params: { id: 1 },
+        load: () => provider,
+      });
+      await vi.waitFor(() => expect(vi.getTimerCount()).toBe(1));
+      await vi.advanceTimersToNextTimerAsync();
+      expect(entry.renew).toHaveBeenCalledOnce();
+      finish("stale provider result");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(entry.fulfill).not.toHaveBeenCalled();
+
+      await vi.advanceTimersToNextTimerAsync();
+      await expect(result).resolves.toBe("winner");
+      expect(entry.fulfill).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels while waiting for an unresolved renewal", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-09T12:00:00.000Z"));
+    let finish!: (value: string) => void;
+    try {
+      const provider = new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+      const entry: AppToolCacheEntryRpc = {
+        fulfill: vi.fn(async () => ({ accepted: true, persisted: true } as const)),
+        getOrReserve: vi.fn(async () => ({ lease: "uncertain-lease", status: "leader" as const })),
+        release: vi.fn(async () => {}),
+        remove: vi.fn(async () => {}),
+        renew: vi.fn(() => new Promise<boolean>(() => {})),
+      };
+      const controller = new AbortController();
+      const cache = createAppToolCache({ getByName: () => entry });
+      const result = cache.getOrLoad({
+        namespace: "renewal-abort:v1",
+        params: { id: 1 },
+        load: () => provider,
+        signal: controller.signal,
+      });
+      await vi.advanceTimersByTimeAsync(APP_TOOL_CACHE_LEASE_TTL_MS / 2);
+      finish("provider result");
+      await vi.advanceTimersByTimeAsync(0);
+
+      controller.abort();
+      await expect(result).rejects.toMatchObject({ name: "AbortError" });
+      expect(entry.release).toHaveBeenCalledWith("uncertain-lease");
+      expect(entry.fulfill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the coordinated winner when fulfillment rejects an expired lease", async () => {
+    const entry: AppToolCacheEntryRpc = {
+      fulfill: vi.fn(async () => ({ accepted: false, persisted: false } as const)),
+      getOrReserve: vi.fn()
+        .mockResolvedValueOnce({ lease: "expired-lease", status: "leader" })
+        .mockResolvedValueOnce({ status: "hit", value: '"winner"' }),
+      release: vi.fn(async () => {}),
+      remove: vi.fn(async () => {}),
+      renew: vi.fn(async () => true),
+    };
+    const cache = createAppToolCache({ getByName: () => entry });
+    const load = vi.fn(async () => "stale provider result");
+
+    await expect(cache.getOrLoad({
+      namespace: "fulfillment-loss:v1",
+      params: { id: 1 },
+      load,
+    })).resolves.toBe("winner");
+    expect(entry.fulfill).toHaveBeenCalledWith(
+      "expired-lease",
+      '"stale provider result"',
+      true,
+    );
+    expect(entry.getOrReserve).toHaveBeenCalledTimes(2);
+    expect(load).toHaveBeenCalledOnce();
+  });
+
   it("shares but does not persist results rejected by cache admission", async () => {
-    const { cache } = harness();
+    const { cache, entries } = harness();
     let finish!: (value: string) => void;
     const provider = new Promise<string>((resolve) => {
       finish = resolve;
@@ -229,6 +392,9 @@ describe("app-wide tool cache client", () => {
     const first = cache.getOrLoad({ ...input, load: firstLoad });
     const follower = cache.getOrLoad({ ...input, load: followerLoad });
     await vi.waitFor(() => expect(firstLoad).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+    await vi.waitFor(() => {
+      expect([...entries.values()][0]?.getWaiterCountForTest()).toBe(1);
+    });
     finish("partial");
 
     await expect(first).resolves.toBe("partial");
@@ -240,23 +406,26 @@ describe("app-wide tool cache client", () => {
     })).resolves.toBe("fresh");
   });
 
-  it("returns successful JSON values when cache serialization fails", async () => {
-    const cache = createAppToolCache({
-      getByName: () => ({
-        fulfill: vi.fn(async () => { throw new Error("storage unavailable"); }),
-        getOrReserve: vi.fn(async () => ({ lease: "lease", status: "leader" as const })),
-        release: vi.fn(async () => {}),
-        remove: vi.fn(async () => {}),
-        renew: vi.fn(async () => true),
-      }),
-    });
-    const value = { result: "provider" } as const;
+  it("does not publish an indeterminate fulfillment result", async () => {
+    const entry: AppToolCacheEntryRpc = {
+      fulfill: vi.fn(async () => { throw new Error("storage unavailable"); }),
+      getOrReserve: vi.fn()
+        .mockResolvedValueOnce({ lease: "lease", status: "leader" })
+        .mockResolvedValueOnce({ status: "hit", value: '{"result":"winner"}' }),
+      release: vi.fn(async () => {}),
+      remove: vi.fn(async () => {}),
+      renew: vi.fn(async () => true),
+    };
+    const cache = createAppToolCache({ getByName: () => entry });
+    const load = vi.fn(async () => ({ result: "stale provider" } as const));
 
     await expect(cache.getOrLoad({
       namespace: "generic:v1",
       params: { id: "storage-failure" },
-      load: async () => value,
-    })).resolves.toEqual(value);
+      load,
+    })).resolves.toEqual({ result: "winner" });
+    expect(load).toHaveBeenCalledOnce();
+    expect(entry.release).toHaveBeenCalledWith("lease");
   });
 
   it("fails open when key or stub construction fails", async () => {

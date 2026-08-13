@@ -32,9 +32,12 @@ export type ToolResultPage = Readonly<{
 export type StoredToolResultPage = ToolResultSnapshot & ToolResultPage;
 
 /**
- * Private snapshot persistence supplied by the host. A returned handle must
- * never be rebound to different snapshot data. `getPage` is the scoped
- * redemption boundary and must return null for a handle from another scope.
+ * Synchronous snapshot retention supplied by the host. Methods are
+ * intentionally synchronous because delivery exposes a handle only after
+ * `set` succeeds. Async durable persistence is a host concern outside this
+ * interface. A returned handle must never be rebound to different snapshot
+ * data. `getPage` is the scoped redemption boundary and must return null for
+ * a handle from another scope.
  */
 export interface ToolResultStore {
   getPage(input: Readonly<{
@@ -349,7 +352,7 @@ export function boundedToolErrorMessage(error: unknown): string {
   return `${page.content}${suffix}`;
 }
 
-/** A bounded process-local adapter; durable stores can implement ToolResultStore. */
+/** A bounded, expiring, process-local in-memory store; it is not durable. */
 export function createInMemoryToolResultStore(
   maximumCharacters = TOOL_RESULT_SNAPSHOT_MAX_CHARACTERS,
   maximumTotalCharacters = TOOL_RESULT_STORE_MAX_CHARACTERS,

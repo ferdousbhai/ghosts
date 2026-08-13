@@ -35,9 +35,9 @@ export function toDraft07JsonSchema(schema, options = {}) {
         converted = input({ target: "draft-07" });
     }
     else {
-        converted = unwrapStructuralSchema(schema);
+        return requireDeclaredDraft07Object(unwrapStructuralSchema(schema));
     }
-    return normalizeDraft07Object(converted);
+    return normalizeGeneratedDraft07Object(converted);
 }
 /**
  * Asynchronously validate and return transformed arguments. Structural JSON
@@ -311,24 +311,55 @@ function unwrapStructuralSchema(schema) {
     if (!isObject(schema))
         return schema;
     const candidate = schema;
-    if (isObject(candidate.jsonSchema))
-        return candidate.jsonSchema;
-    if (isObject(candidate.schema))
-        return candidate.schema;
+    const hasDeclaration = Object.hasOwn(candidate, "$schema");
+    const hasJsonSchema = Object.hasOwn(candidate, "jsonSchema");
+    const hasSchema = Object.hasOwn(candidate, "schema");
+    if (hasDeclaration && (hasJsonSchema || hasSchema)) {
+        throw new ToolSchemaError("Structural tool schema must not mix $schema with wrapper fields");
+    }
+    if (hasDeclaration)
+        return schema;
+    if (hasJsonSchema && hasSchema) {
+        throw new ToolSchemaError("Structural tool schema wrapper must declare only jsonSchema or schema");
+    }
+    if (hasJsonSchema || hasSchema) {
+        const wrapped = hasJsonSchema ? candidate.jsonSchema : candidate.schema;
+        if (!isObject(wrapped)) {
+            throw new ToolSchemaError("Structural tool schema wrapper must contain a JSON Schema object");
+        }
+        return wrapped;
+    }
     return schema;
 }
-function normalizeDraft07Object(value) {
+function requireDeclaredDraft07Object(value) {
+    const schema = requireSchemaObject(value);
+    if (Object.hasOwn(schema, "jsonSchema") || Object.hasOwn(schema, "schema")) {
+        throw new ToolSchemaError("Structural tool schema must not mix $schema with wrapper fields");
+    }
+    if (!Object.hasOwn(schema, "$schema")) {
+        throw new ToolSchemaError("Structural tool schema must explicitly declare Draft-07 with $schema");
+    }
+    return requireDraft07Identifier(schema);
+}
+function normalizeGeneratedDraft07Object(value) {
+    const schema = requireSchemaObject(value);
+    if (!Object.hasOwn(schema, "$schema") || schema.$schema === undefined) {
+        return { ...schema, $schema: DRAFT_07_SCHEMA };
+    }
+    return requireDraft07Identifier(schema);
+}
+function requireSchemaObject(value) {
     if (!isObject(value) || typeof value.then === "function") {
         throw new ToolSchemaError("Tool input schema must convert to a JSON Schema object");
     }
-    if ("$schema" in value && value.$schema !== undefined) {
-        if (typeof value.$schema !== "string" ||
-            !isDraft07Identifier(value.$schema)) {
-            throw new ToolSchemaError(`Structural tool schema declares unsupported draft: ${String(value.$schema)}`);
-        }
-        return value;
+    return value;
+}
+function requireDraft07Identifier(schema) {
+    if (typeof schema.$schema !== "string" ||
+        !isDraft07Identifier(schema.$schema)) {
+        throw new ToolSchemaError(`Tool input schema declares unsupported draft: ${String(schema.$schema)}`);
     }
-    return { ...value, $schema: DRAFT_07_SCHEMA };
+    return schema;
 }
 function isDraft07Identifier(value) {
     return /^https?:\/\/json-schema\.org\/draft-07\/schema#?$/.test(value);

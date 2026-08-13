@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  READ_URL_MODEL_MAX_CHARACTERS,
+  RESEARCH_RESULT_TITLE_MAX_CHARACTERS,
+  RESEARCH_RESULT_URL_MAX_CHARACTERS,
+  WEB_SEARCH_MODEL_MAX_CHARACTERS,
   WEB_SEARCH_TOOL_NAME,
   X_SEARCH_TOOL_NAME,
   assertPublicHttpsUrl,
   buildNativeXSearchRequest,
   buildRedditSearchUrl,
   executeExaSearch,
+  formatReadUrlResults,
   formatWebSearchResults,
   normalizeNativeXSearchResult,
   normalizeSearchQueries,
@@ -37,6 +42,10 @@ describe("model-facing contracts", () => {
       from_date: "2026-08-02",
       to_date: "2026-08-01",
     }).success).toBe(false);
+    expect(webSearchInputSchema.safeParse({ query: "agents", from_date: "2026-02-29" }).success)
+      .toBe(false);
+    expect(xSearchInputSchema.safeParse({ query: "agents", to_date: "2026-04-31" }).success)
+      .toBe(false);
   });
 
   it("keeps URL reads and Reddit validation separate", () => {
@@ -98,6 +107,45 @@ describe("provider normalization", () => {
       text: "Useful context",
       url: "https://example.com/article",
     });
+  });
+
+  it("bounds aggregate Exa highlight normalization", async () => {
+    const search = vi.fn().mockResolvedValue({
+      results: [{
+        id: "exa-large",
+        url: "https://example.com/large",
+        highlights: Array.from({ length: 100 }, () => "x".repeat(100_000)),
+      }, {
+        id: "exa-unicode",
+        url: "https://example.com/unicode",
+        highlights: ["x".repeat(99_998), "🙂"],
+      }],
+    });
+
+    const execution = await executeExaSearch({ search }, "agents");
+    expect(execution.results[0]?.text).toHaveLength(100_000);
+    expect(execution.results[1]?.text).toHaveLength(99_998);
+  });
+
+  it("skips empty Exa highlights and falls back when all are empty", async () => {
+    const search = vi.fn().mockResolvedValue({
+      results: [{
+        id: "exa-empty-first",
+        url: "https://example.com/highlights",
+        highlights: ["", "useful"],
+      }, {
+        id: "exa-empty-all",
+        url: "https://example.com/summary",
+        highlights: [""],
+        summary: "fallback",
+      }],
+    });
+
+    const execution = await executeExaSearch({ search }, "agents");
+    expect(execution.results.map((result) => result.text)).toEqual([
+      "useful",
+      "fallback",
+    ]);
   });
 
   it("forwards Exa cancellation to the structural client", async () => {
@@ -171,26 +219,76 @@ describe("provider normalization", () => {
     })]);
   });
 
-  it("formats bounded model-facing web results", () => {
-    const formatted = formatWebSearchResults(Array.from({ length: 10 }, (_, index) => ({
-      url: `https://example.com/${index}`,
+  it("bounds every formatted field and aggregate model output", () => {
+    const ordinary = formatWebSearchResults(Array.from({ length: 10 }, (_, index) => ({
+      highlights: ["useful context"],
       title: `Result ${index}`,
-      highlights: ["a".repeat(700)],
+      url: `https://example.com/${index}`,
     })));
-    expect(formatted).toContain("Result 7");
-    expect(formatted).not.toContain("Result 8");
-    expect(formatted.length).toBeLessThan(6_000);
+    expect(ordinary).toContain("Result 7");
+    expect(ordinary).not.toContain("Result 8");
+
+    const suffix = "must-not-escape";
+    const formatted = formatWebSearchResults(Array.from({ length: 8 }, (_, index) => ({
+      author: `${"a".repeat(10_000)}${suffix}`,
+      highlights: [`${"h".repeat(10_000)}${suffix}`],
+      publishedDate: "2026-02-29",
+      title: `Result ${index} ${"t".repeat(10_000)}${suffix}`,
+      url: `https://example.com/${"u".repeat(10_000)}${suffix}`,
+    })));
+    expect(formatted).not.toContain(suffix);
+    expect(formatted).not.toContain("2026-02-29");
+    expect(formatted.length).toBeLessThanOrEqual(WEB_SEARCH_MODEL_MAX_CHARACTERS);
+    expect(formatted).toMatch(/\n> h+…$/);
+
+    const whitespaceHeavy = formatWebSearchResults([{
+      summary: `${" \n\t".repeat(10_000)}useful ${"context ".repeat(200)}`,
+      title: "Whitespace-heavy",
+      url: "https://example.com/whitespace",
+    }]);
+    expect(whitespaceHeavy).toMatch(/\n> useful context(?: context)*…$/);
+    expect(whitespaceHeavy.length).toBeLessThanOrEqual(WEB_SEARCH_MODEL_MAX_CHARACTERS);
+
+    const omittedHighlight = formatWebSearchResults([{
+      highlights: ["x".repeat(600), "omitted"],
+      title: "Bounded highlights",
+      url: "https://example.com/highlights",
+    }]);
+    expect(omittedHighlight).toMatch(/\n> x{599}…$/);
+    expect(omittedHighlight).not.toContain("omitted");
+
+    const escaped = formatWebSearchResults([{
+      title: "[".repeat(1_000),
+      url: `https://example.com/${"(".repeat(4_096)}`,
+    }]);
+    const heading = /^\[1\] \[(.*)\]\((.*)\)$/.exec(escaped);
+    expect(heading?.[1]?.length).toBeLessThanOrEqual(RESEARCH_RESULT_TITLE_MAX_CHARACTERS);
+    expect(heading?.[2]?.length).toBeLessThanOrEqual(RESEARCH_RESULT_URL_MAX_CHARACTERS);
+    expect(formatWebSearchResults([{
+      title: `${"a".repeat(997)}🙂[`,
+      url: "https://example.com",
+    }])).toContain("🙂…](https://example.com)");
+
+    const readOutput = formatReadUrlResults(Array.from({ length: 5 }, (_, index) => ({
+      author: "reader",
+      publishedDate: "2024-02-29T12:00:00Z",
+      text: `${index}${"x".repeat(100_000)}`,
+      title: `Page ${index}`,
+      url: `https://example.com/${index}`,
+    })));
+    expect(readOutput).toContain("2024-02-29");
+    expect(readOutput.length).toBeLessThanOrEqual(READ_URL_MODEL_MAX_CHARACTERS);
   });
 });
 
 describe("native xAI X search", () => {
   it("builds native requests without an SDK dependency", () => {
     expect(buildNativeXSearchRequest({
-      model: "grok-4",
+      model: "test-model",
       nativeToolOptions: { allowedXHandles: ["@cloudflare"], fromDate: "2026-08-01" },
       prompt: "Search X",
     })).toMatchObject({
-      model: "grok-4",
+      model: "test-model",
       store: false,
       tool_choice: "required",
       tools: [{
@@ -199,6 +297,16 @@ describe("native xAI X search", () => {
         from_date: "2026-08-01",
       }],
     });
+  });
+
+  it("rejects impossible native tool dates", () => {
+    for (const fromDate of ["", "2026-02-29"]) {
+      expect(() => buildNativeXSearchRequest({
+        model: "test-model",
+        nativeToolOptions: { fromDate },
+        prompt: "Search X",
+      })).toThrow("fromDate must be a real date using YYYY-MM-DD");
+    }
   });
 
   it("normalizes direct structured and Responses API output", () => {
@@ -222,6 +330,33 @@ describe("native xAI X search", () => {
       items: [{ author_handle: "cloudflare" }],
       totalUsage: { cacheRead: 2, input: 8, output: 5, totalTokens: 15 },
     });
+  });
+
+  it("requires valid nonnegative usage on successful responses", () => {
+    const success = { output: { items: [] } };
+    for (const usage of [
+      undefined,
+      { input_tokens: -1, output_tokens: 1, total_tokens: 0 },
+      { input_tokens: 1.5, output_tokens: 1, total_tokens: 2.5 },
+      { input_tokens: Number.MAX_SAFE_INTEGER, output_tokens: 1, total_tokens: 0 },
+      { input_tokens: 1, output_tokens: 1 },
+      { input_tokens: 1, output_tokens: 1, total_tokens: 3 },
+      {
+        input_tokens: 1,
+        input_tokens_details: { cached_tokens: null },
+        output_tokens: 1,
+        total_tokens: 2,
+      },
+      {
+        input_tokens: 1,
+        input_tokens_details: { cached_tokens: 2 },
+        output_tokens: 1,
+        total_tokens: 2,
+      },
+    ]) {
+      expect(() => normalizeNativeXSearchResult({ ...success, usage }))
+        .toThrow(/^xAI native X research returned invalid usage$/);
+    }
   });
 
   it("rejects provider errors with safe messages and attached usage", () => {
@@ -258,7 +393,7 @@ describe("native xAI X search", () => {
       new Error("private xAI transport detail"),
     );
     await expect(runNativeXSearch({
-      model: "grok-4",
+      model: "test-model",
       prompt: "Search X",
       transport,
     })).rejects.toThrow(/^xAI native X research failed$/);
@@ -289,7 +424,7 @@ describe("native xAI X search", () => {
       }] },
       usage: { input_tokens: 4, output_tokens: 3, total_tokens: 7 },
     });
-    const result = await runNativeXSearch({ model: "grok-4", prompt: "Search X", transport });
+    const result = await runNativeXSearch({ model: "test-model", prompt: "Search X", transport });
     expect(result.totalUsage.totalTokens).toBe(7);
     expect(transport).toHaveBeenCalledWith(expect.objectContaining({ store: false }), {
       signal: expect.any(AbortSignal),

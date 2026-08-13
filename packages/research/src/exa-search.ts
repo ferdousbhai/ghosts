@@ -1,7 +1,8 @@
 import { z } from "zod";
 import type { ResearchResult } from "./contracts.js";
 
-const boundedProviderString = z.string().max(100_000);
+const EXA_NORMALIZED_TEXT_MAX_CHARACTERS = 100_000;
+const boundedProviderString = z.string().max(EXA_NORMALIZED_TEXT_MAX_CHARACTERS);
 const exaResearchResultSchema = z
   .object({
     author: z.string().max(1_000).optional(),
@@ -124,10 +125,39 @@ export async function executeExaSearch(
     results: providerResults
       .map((result) => ({
         ...result,
-        text: result.text ?? result.highlights?.join(" ") ?? result.summary,
+        text: result.text ?? boundedJoin(result.highlights) ?? result.summary,
       }))
       .filter((result) => options.includeResult?.(result) ?? true),
   };
+}
+
+function boundedJoin(values: readonly string[] | undefined): string | undefined {
+  if (!values) return undefined;
+  let output = "";
+  for (const value of values) {
+    const separator = output ? " " : "";
+    const remaining = EXA_NORMALIZED_TEXT_MAX_CHARACTERS - output.length - separator.length;
+    if (remaining <= 0) break;
+    const part = sliceText(value, remaining);
+    if (!part) continue;
+    output += separator + part;
+  }
+  return output || undefined;
+}
+
+function sliceText(value: string, maximumCharacters: number): string {
+  let end = Math.min(value.length, maximumCharacters);
+  if (
+    end > 0 &&
+    end < value.length &&
+    value.charCodeAt(end - 1) >= 0xd800 &&
+    value.charCodeAt(end - 1) <= 0xdbff &&
+    value.charCodeAt(end) >= 0xdc00 &&
+    value.charCodeAt(end) <= 0xdfff
+  ) {
+    end -= 1;
+  }
+  return value.slice(0, end);
 }
 
 export function mapExaCategory(category: string): string | undefined {

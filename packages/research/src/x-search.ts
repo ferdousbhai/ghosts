@@ -149,14 +149,21 @@ export function normalizeNativeXSearchResult(
   assertMaximumItems(maxItems);
   const record = asRecord(untrusted);
   if (!record) throw new Error("xAI native X research returned an invalid response");
-  const totalUsage = normalizeNativeXSearchUsage(record.usage ?? record.totalUsage);
+  const untrustedUsage = record.usage ?? record.totalUsage;
+  const meteredUsage = normalizeNativeXSearchUsageForError(untrustedUsage);
   if (typeof record.status === "string" && record.status !== "completed") {
-    throw meteredError("xAI native X research did not complete", totalUsage);
+    throw meteredError("xAI native X research did not complete", meteredUsage);
   }
   if (record.error) {
-    throw meteredError("xAI native X research failed", totalUsage);
+    throw meteredError("xAI native X research failed", meteredUsage);
   }
-  const output = extractStructuredOutput(record);
+  let totalUsage: NativeXSearchUsage;
+  try {
+    totalUsage = normalizeNativeXSearchUsage(untrustedUsage);
+  } catch {
+    throw meteredError("xAI native X research returned invalid usage", meteredUsage);
+  }
+  const output = extractStructuredOutput(record, totalUsage);
   try {
     const parsed = xSearchOutputSchema.parse(output);
     return { items: parsed.items.slice(0, maxItems), totalUsage };
@@ -170,23 +177,43 @@ export function normalizeNativeXSearchResult(
 
 export function normalizeNativeXSearchUsage(untrusted: unknown): NativeXSearchUsage {
   const usage = asRecord(untrusted);
-  const inputDetails = asRecord(usage?.input_tokens_details ?? usage?.inputTokenDetails);
-  const input = nonNegativeInteger(usage?.input_tokens ?? usage?.inputTokens);
-  const output = nonNegativeInteger(usage?.output_tokens ?? usage?.outputTokens);
-  const reportedTotal = nonNegativeInteger(usage?.total_tokens ?? usage?.totalTokens);
-  const cacheRead = nonNegativeInteger(
-    inputDetails?.cached_tokens ?? inputDetails?.cacheReadTokens,
+  if (!usage) throw new Error("xAI native X research returned invalid usage");
+  const rawInputDetails = readAliasedValue(
+    usage,
+    "input_tokens_details",
+    "inputTokenDetails",
   );
-  const cacheWrite = nonNegativeInteger(
-    inputDetails?.cache_write_tokens ?? inputDetails?.cacheWriteTokens,
-  );
-  const cacheInput = cacheRead + cacheWrite <= input ? input - cacheRead - cacheWrite : input;
+  const inputDetails = rawInputDetails === undefined ? null : asRecord(rawInputDetails);
+  const input = readAliasedValue(usage, "input_tokens", "inputTokens");
+  const output = readAliasedValue(usage, "output_tokens", "outputTokens");
+  const reportedTotal = readAliasedValue(usage, "total_tokens", "totalTokens");
+  const rawCacheRead = inputDetails
+    ? readAliasedValue(inputDetails, "cached_tokens", "cacheReadTokens")
+    : undefined;
+  const rawCacheWrite = inputDetails
+    ? readAliasedValue(inputDetails, "cache_write_tokens", "cacheWriteTokens")
+    : undefined;
+  const cacheRead = rawCacheRead === undefined ? 0 : rawCacheRead;
+  const cacheWrite = rawCacheWrite === undefined ? 0 : rawCacheWrite;
+  if (
+    !isNonNegativeInteger(input) ||
+    !isNonNegativeInteger(output) ||
+    !isNonNegativeInteger(reportedTotal) ||
+    (rawInputDetails !== undefined && !inputDetails) ||
+    !isNonNegativeInteger(cacheRead) ||
+    !isNonNegativeInteger(cacheWrite) ||
+    !Number.isSafeInteger(input + output) ||
+    reportedTotal !== input + output ||
+    cacheRead + cacheWrite > input
+  ) {
+    throw new Error("xAI native X research returned invalid usage");
+  }
   return {
-    cacheRead: cacheRead + cacheWrite <= input ? cacheRead : 0,
-    cacheWrite: cacheRead + cacheWrite <= input ? cacheWrite : 0,
-    input: cacheInput,
+    cacheRead,
+    cacheWrite,
+    input: input - cacheRead - cacheWrite,
     output,
-    totalTokens: reportedTotal === input + output ? reportedTotal : input + output,
+    totalTokens: reportedTotal,
     raw: untrusted,
   };
 }
@@ -218,11 +245,11 @@ function validateNativeToolOptions(options: NativeXSearchToolOptions | undefined
     }
     handles?.forEach(normalizeHandle);
   }
-  if (options?.fromDate && !/^\d{4}-\d{2}-\d{2}$/.test(options.fromDate)) {
-    throw new Error("fromDate must use YYYY-MM-DD");
+  if (options?.fromDate !== undefined && !z.iso.date().safeParse(options.fromDate).success) {
+    throw new Error("fromDate must be a real date using YYYY-MM-DD");
   }
-  if (options?.toDate && !/^\d{4}-\d{2}-\d{2}$/.test(options.toDate)) {
-    throw new Error("toDate must use YYYY-MM-DD");
+  if (options?.toDate !== undefined && !z.iso.date().safeParse(options.toDate).success) {
+    throw new Error("toDate must be a real date using YYYY-MM-DD");
   }
   if (options?.fromDate && options.toDate && options.fromDate > options.toDate) {
     throw new Error("fromDate must not be after toDate");
@@ -245,7 +272,10 @@ function nativeXSearchTool(options: NativeXSearchToolOptions | undefined): Recor
   };
 }
 
-function extractStructuredOutput(response: Record<string, unknown>): unknown {
+function extractStructuredOutput(
+  response: Record<string, unknown>,
+  usage: NativeXSearchUsage,
+): unknown {
   if (asRecord(response.output)?.items) return response.output;
   if (response.items) return { items: response.items };
   const text = extractOutputText(response.output) ??
@@ -253,7 +283,7 @@ function extractStructuredOutput(response: Record<string, unknown>): unknown {
   if (!text?.trim()) {
     throw meteredError(
       "xAI native X research returned an empty answer",
-      normalizeNativeXSearchUsage(response.usage ?? response.totalUsage),
+      usage,
     );
   }
   try {
@@ -261,7 +291,7 @@ function extractStructuredOutput(response: Record<string, unknown>): unknown {
   } catch {
     throw meteredError(
       "xAI native X research returned invalid structured output",
-      normalizeNativeXSearchUsage(response.usage ?? response.totalUsage),
+      usage,
     );
   }
 }
@@ -304,10 +334,33 @@ function withTimeout(parent: AbortSignal | undefined, timeoutMs = 120_000): Abor
   return parent ? AbortSignal.any([parent, timeout]) : timeout;
 }
 
-function nonNegativeInteger(value: unknown): number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value
-    : 0;
+function normalizeNativeXSearchUsageForError(untrusted: unknown): NativeXSearchUsage {
+  try {
+    return normalizeNativeXSearchUsage(untrusted);
+  } catch {
+    return {
+      cacheRead: 0,
+      cacheWrite: 0,
+      input: 0,
+      output: 0,
+      totalTokens: 0,
+      raw: untrusted,
+    };
+  }
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function readAliasedValue(
+  record: Record<string, unknown>,
+  providerName: string,
+  alternativeName: string,
+): unknown {
+  return record[providerName] === undefined
+    ? record[alternativeName]
+    : record[providerName];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

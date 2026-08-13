@@ -21,6 +21,11 @@ const objectSchema = {
   type: "object",
 } as const;
 
+const draft07ObjectSchema = {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  ...objectSchema,
+} as const;
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -54,15 +59,12 @@ describe("schema conversion", () => {
   });
 
   it("uses the Standard Schema JSON Schema extension with a draft-07 target", () => {
-    const input = vi.fn(() => ({
-      ...objectSchema,
-      $schema: "https://json-schema.org/draft-07/schema",
-    }));
+    const input = vi.fn(() => objectSchema);
     const schema = standardSchema((value) => ({ value }), input);
 
     expect(toDraft07JsonSchema(schema)).toEqual({
+      $schema: "http://json-schema.org/draft-07/schema#",
       ...objectSchema,
-      $schema: "https://json-schema.org/draft-07/schema",
     });
     expect(input).toHaveBeenCalledWith({ target: "draft-07" });
   });
@@ -79,14 +81,75 @@ describe("schema conversion", () => {
   });
 
   it.each([
+    ["direct", draft07ObjectSchema],
+    ["jsonSchema wrapper", { jsonSchema: draft07ObjectSchema }],
+    ["schema wrapper", { schema: draft07ObjectSchema }],
+  ])("accepts an explicitly declared %s structural schema", (_label, schema) => {
+    expect(toDraft07JsonSchema(schema as ToolInputSchema)).toBe(
+      draft07ObjectSchema,
+    );
+  });
+
+  it("preserves an explicitly declared Draft-07 identifier", () => {
+    const schema = {
+      ...objectSchema,
+      $schema: "https://json-schema.org/draft-07/schema" as const,
+    };
+    expect(toDraft07JsonSchema(schema)).toBe(schema);
+  });
+
+  it.each([
     ["direct", objectSchema],
     ["jsonSchema wrapper", { jsonSchema: objectSchema }],
     ["schema wrapper", { schema: objectSchema }],
-  ])("accepts a %s structural schema", (_label, schema) => {
-    expect(toDraft07JsonSchema(schema as ToolInputSchema)).toEqual({
-      $schema: "http://json-schema.org/draft-07/schema#",
-      ...objectSchema,
-    });
+  ])("rejects an unlabeled %s structural schema", (_label, schema) => {
+    expect(() =>
+      toDraft07JsonSchema(schema as unknown as ToolInputSchema),
+    ).toThrow(/explicitly declare Draft-07/);
+  });
+
+  it("rejects malformed, ambiguous, or inherited structural declarations", () => {
+    expect(() =>
+      toDraft07JsonSchema({ jsonSchema: true } as never),
+    ).toThrow(/wrapper must contain/);
+    expect(() =>
+      toDraft07JsonSchema({
+        jsonSchema: draft07ObjectSchema,
+        schema: draft07ObjectSchema,
+      } as never),
+    ).toThrow(/only jsonSchema or schema/);
+    expect(() =>
+      toDraft07JsonSchema({
+        $schema: draft07ObjectSchema.$schema,
+        jsonSchema: draft07ObjectSchema,
+      } as never),
+    ).toThrow(/must not mix/);
+    expect(() =>
+      toDraft07JsonSchema({
+        jsonSchema: {
+          $schema: draft07ObjectSchema.$schema,
+          schema: draft07ObjectSchema,
+        },
+      } as never),
+    ).toThrow(/must not mix/);
+    const inheritedDeclaration = Object.assign(
+      Object.create({ $schema: draft07ObjectSchema.$schema }) as object,
+      objectSchema,
+    );
+    expect(() =>
+      toDraft07JsonSchema(inheritedDeclaration as never),
+    ).toThrow(/explicitly declare Draft-07/);
+  });
+
+  it("rejects a conflicting draft returned by a targeted generator", () => {
+    const schema = standardSchema(
+      (value) => ({ value }),
+      () => ({
+        ...objectSchema,
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+      }),
+    );
+    expect(() => toDraft07JsonSchema(schema)).toThrow(/unsupported draft/);
   });
 
   it("rejects arrays, booleans, async conversions, and declared non-draft-07 schemas", () => {
@@ -104,7 +167,7 @@ describe("schema conversion", () => {
       toDraft07JsonSchema({
         ...objectSchema,
         $schema: "https://json-schema.org/draft/2020-12/schema",
-      }),
+      } as never),
     ).toThrow(/unsupported draft/);
   });
 });
@@ -175,7 +238,11 @@ describe("argument validation", () => {
 
   it("requires and awaits a host validator for structural JSON Schema", async () => {
     await expect(
-      validateToolArguments(objectSchema, { value: "x" }, { name: "raw" }),
+      validateToolArguments(
+        draft07ObjectSchema,
+        { value: "x" },
+        { name: "raw" },
+      ),
     ).rejects.toThrow(
       'Structural JSON Schema tool "raw" requires validateArguments',
     );
@@ -186,7 +253,7 @@ describe("argument validation", () => {
     }));
     await expect(
       validateToolArguments(
-        objectSchema,
+        draft07ObjectSchema,
         { value: "x" },
         {
           name: "raw",
@@ -372,7 +439,7 @@ describe("adaptPiTool", () => {
     const onError = vi.fn();
     const tool = adaptPiTool({
       name: "write",
-      definition: { inputSchema: objectSchema, execute },
+      definition: { inputSchema: draft07ObjectSchema, execute },
       validateArguments,
       onError,
     });

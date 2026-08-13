@@ -222,7 +222,7 @@ export function boundedToolErrorMessage(error) {
     const page = sliceTextPage(message, 0, TOOL_ERROR_MAX_CHARACTERS - suffix.length);
     return `${page.content}${suffix}`;
 }
-/** A bounded process-local adapter; durable stores can implement ToolResultStore. */
+/** A bounded, expiring, process-local in-memory store; it is not durable. */
 export function createInMemoryToolResultStore(maximumCharacters = TOOL_RESULT_SNAPSHOT_MAX_CHARACTERS, maximumTotalCharacters = TOOL_RESULT_STORE_MAX_CHARACTERS) {
     const entries = new Map();
     const pinnedScopes = new Map();

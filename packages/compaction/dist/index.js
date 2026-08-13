@@ -37,6 +37,8 @@ export function createConversationCompactionController(options) {
     let nextSequence = 0;
     let pendingSequence = null;
     let branchRevision = 0;
+    let observedRevision = 0;
+    let completedBackgroundRevision = null;
     let preparationTail = Promise.resolve();
     const prepareMessagesOnce = async (fullMessages, context) => {
         if (observedMessages === null ||
@@ -47,10 +49,12 @@ export function createConversationCompactionController(options) {
             latestSnapshot = null;
             pendingSequence = null;
             branchRevision += 1;
+            observedRevision += 1;
         }
         else if (fullMessages.length > observedMessages.length) {
             effectiveMessages.push(...fullMessages.slice(observedMessages.length));
             observedMessages = [...fullMessages];
+            observedRevision += 1;
         }
         const inputTokens = nonNegativeInteger(await options.countInputTokens({
             context,
@@ -58,7 +62,8 @@ export function createConversationCompactionController(options) {
         }), "inputTokens");
         const action = decideConversationCompaction({
             estimatedTokens: inputTokens,
-            pending: pendingSequence !== null,
+            pending: pendingSequence !== null ||
+                completedBackgroundRevision === observedRevision,
             policy: options.policy,
         });
         if (action === "none")
@@ -72,6 +77,7 @@ export function createConversationCompactionController(options) {
             pendingSequence = null;
         const sourceMessages = [...effectiveMessages];
         const sourceBranchRevision = branchRevision;
+        const sourceObservedRevision = observedRevision;
         const createSnapshot = async () => {
             if (sourceBranchRevision !== branchRevision ||
                 sequence !== nextSequence) {
@@ -91,27 +97,32 @@ export function createConversationCompactionController(options) {
         };
         if (action === "background" && options.scheduleCompaction) {
             pendingSequence = sequence;
-            const run = async () => {
-                if (sourceBranchRevision !== branchRevision ||
-                    sequence !== nextSequence) {
-                    throw new ConversationCompactionSupersededError();
-                }
-                pendingSequence = sequence;
-                try {
-                    return await createSnapshot();
-                }
-                catch (error) {
+            let runPromise = null;
+            let schedulingFailed = false;
+            const run = () => {
+                runPromise ??= createSnapshot()
+                    .then((snapshot) => {
+                    if (!schedulingFailed) {
+                        completedBackgroundRevision = sourceObservedRevision;
+                    }
+                    return snapshot;
+                })
+                    .finally(() => {
                     if (pendingSequence === sequence)
                         pendingSequence = null;
-                    throw error;
-                }
+                });
+                return runPromise;
             };
             try {
                 await options.scheduleCompaction({ run, sequence });
             }
             catch (error) {
+                schedulingFailed = true;
                 if (pendingSequence === sequence)
                     pendingSequence = null;
+                if (completedBackgroundRevision === sourceObservedRevision) {
+                    completedBackgroundRevision = null;
+                }
                 throw error;
             }
             return [...effectiveMessages];

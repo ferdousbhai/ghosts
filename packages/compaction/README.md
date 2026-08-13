@@ -21,7 +21,7 @@ import {
 - `canApplyConversationCompaction` guards persisted snapshots against stale or reordered history.
 - `ConversationCompactionSupersededError` and `ConversationCompactionLimitError` identify superseded work and unsafe replacements.
 
-A scheduled background `run()` creates a snapshot but does not apply it to the in-memory controller. The consumer owns durable application and stale-write checks. `latestBlockingSnapshot()` reports only snapshots applied by a blocking preparation; `latestSnapshot()` remains as a deprecated alias.
+A scheduled background `run()` creates a snapshot but does not apply it to the in-memory controller. Pending state lasts until that guarded run settles, then clears on either success or failure. Successful completion suppresses duplicate proactive scheduling for unchanged history; a new history tail permits new work, while failure permits retry. Repeated calls to the same `run()` share its single snapshot attempt. Completion from superseded work cannot clear a newer pending run. The consumer owns durable application and stale-write checks. `latestBlockingSnapshot()` reports only snapshots applied by a blocking preparation; `latestSnapshot()` remains as a deprecated alias.
 
 ## xAI API
 

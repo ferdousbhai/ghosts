@@ -23,6 +23,7 @@ interface FakeStorage {
 }
 
 function createStorage(options: Readonly<{
+  beforeTransaction?: (storage: FakeStorage) => Promise<void>;
   failAlarm?: boolean;
   failResultPut?: boolean;
 }> = {}): FakeStorage {
@@ -55,6 +56,7 @@ function createStorage(options: Readonly<{
       alarm = scheduledTime;
     },
     async transaction<T>(callback: (transaction: FakeStorage) => Promise<T>) {
+      await options.beforeTransaction?.(storage);
       return callback(storage);
     },
   };
@@ -91,7 +93,7 @@ describe("app-wide tool cache entry", () => {
     );
 
     await expect(cache.fulfill(reservation.lease, '"shared"', true))
-      .resolves.toBe(true);
+      .resolves.toEqual({ accepted: true, persisted: true });
     await expect(storage.getAlarm()).resolves.toBe(
       now.getTime() + APP_TOOL_CACHE_TTL_MS,
     );
@@ -110,7 +112,7 @@ describe("app-wide tool cache entry", () => {
 
     const rehydrated = entry(storage);
     await expect(rehydrated.fulfill(reservation.lease, '"durable"', true))
-      .resolves.toBe(true);
+      .resolves.toEqual({ accepted: true, persisted: true });
     await expect(entry(storage).getOrReserve()).resolves.toMatchObject({
       status: "hit",
       value: '"durable"',
@@ -215,7 +217,7 @@ describe("app-wide tool cache entry", () => {
     ])).resolves.toBe("pending");
 
     await expect(cache.fulfill(reservation.lease, '"stale"', true))
-      .resolves.toBe(false);
+      .resolves.toEqual({ accepted: false, persisted: false });
     await expect(Promise.race([
       replacementFollower,
       Promise.resolve("pending"),
@@ -225,6 +227,63 @@ describe("app-wide tool cache entry", () => {
       status: "hit",
       value: '"replacement"',
     });
+  });
+
+  it("does not let an old leader release a replacement lease", async () => {
+    let replaceBeforeTransaction = false;
+    const replacementExpiresAt = now.getTime() + APP_TOOL_CACHE_LEASE_TTL_MS;
+    const storage = createStorage({
+      beforeTransaction: async (transaction) => {
+        if (!replaceBeforeTransaction) return;
+        replaceBeforeTransaction = false;
+        await transaction.put("lease", {
+          expiresAt: replacementExpiresAt,
+          lease: "replacement-lease",
+        });
+        await transaction.setAlarm(replacementExpiresAt);
+      },
+    });
+    const cache = entry(storage);
+    const reservation = await cache.getOrReserve();
+    expect(reservation.status).toBe("leader");
+    if (reservation.status !== "leader") return;
+    replaceBeforeTransaction = true;
+
+    await cache.release(reservation.lease);
+    await expect(storage.get("lease")).resolves.toEqual({
+      expiresAt: replacementExpiresAt,
+      lease: "replacement-lease",
+    });
+    await expect(storage.getAlarm()).resolves.toBe(replacementExpiresAt);
+  });
+
+  it("atomically rejects fulfillment after a replacement takes leadership", async () => {
+    let replaceBeforeTransaction = false;
+    const replacementExpiresAt = now.getTime() + APP_TOOL_CACHE_LEASE_TTL_MS;
+    const storage = createStorage({
+      beforeTransaction: async (transaction) => {
+        if (!replaceBeforeTransaction) return;
+        replaceBeforeTransaction = false;
+        await transaction.put("lease", {
+          expiresAt: replacementExpiresAt,
+          lease: "replacement-lease",
+        });
+        await transaction.setAlarm(replacementExpiresAt);
+      },
+    });
+    const cache = entry(storage);
+    const reservation = await cache.getOrReserve();
+    expect(reservation.status).toBe("leader");
+    if (reservation.status !== "leader") return;
+    replaceBeforeTransaction = true;
+
+    await expect(cache.fulfill(reservation.lease, '"stale"', true))
+      .resolves.toEqual({ accepted: false, persisted: false });
+    await expect(storage.get("lease")).resolves.toEqual({
+      expiresAt: replacementExpiresAt,
+      lease: "replacement-lease",
+    });
+    await expect(storage.get<unknown>("result")).resolves.toBeUndefined();
   });
 
   it("single-flights byte-oversized values without persisting them", async () => {
@@ -237,7 +296,7 @@ describe("app-wide tool cache entry", () => {
     const oversized = "€".repeat(Math.floor(APP_TOOL_CACHE_MAX_BYTES / 3) + 1);
 
     await expect(cache.fulfill(reservation.lease, oversized, true))
-      .resolves.toBe(false);
+      .resolves.toEqual({ accepted: true, persisted: false });
     await expect(follower).resolves.toEqual({
       status: "hit",
       value: oversized,
@@ -255,7 +314,7 @@ describe("app-wide tool cache entry", () => {
     const follower = cache.getOrReserve();
 
     await expect(cache.fulfill(reservation.lease, '"partial"', false))
-      .resolves.toBe(false);
+      .resolves.toEqual({ accepted: true, persisted: false });
     await expect(follower).resolves.toEqual({
       status: "hit",
       value: '"partial"',
@@ -263,18 +322,20 @@ describe("app-wide tool cache entry", () => {
     await expect(storage.get<unknown>("result")).resolves.toBeUndefined();
   });
 
-  it("fails open and cleans up when persistent storage rejects a result", async () => {
+  it("accepts and shares a result when persistent storage rejects it", async () => {
     const storage = createStorage({ failResultPut: true });
-    const cacheEntry = entry(storage);
-    const cache = createAppToolCache({
-      getByName: () => cacheEntry,
-    });
+    const cache = entry(storage);
+    const reservation = await cache.getOrReserve();
+    expect(reservation.status).toBe("leader");
+    if (reservation.status !== "leader") return;
+    const follower = cache.getOrReserve();
 
-    await expect(cache.getOrLoad({
-      namespace: "read-url:v2",
-      params: { urls: ["https://example.com"] },
-      load: async () => "provider result",
-    })).resolves.toBe("provider result");
+    await expect(cache.fulfill(reservation.lease, '"provider result"', true))
+      .resolves.toEqual({ accepted: true, persisted: false });
+    await expect(follower).resolves.toEqual({
+      status: "hit",
+      value: '"provider result"',
+    });
     await expect(storage.get<unknown>("lease")).resolves.toBeUndefined();
     await expect(storage.getAlarm()).resolves.toBeNull();
   });

@@ -67,44 +67,64 @@ export function appToolCacheDurableObject(DurableObjectBaseClass) {
             });
         }
         async fulfill(lease, value, persist) {
-            const storedLease = await this.#cacheStorage.get(LEASE_KEY);
-            if (storedLease?.lease !== lease
-                || storedLease.expiresAt <= Date.now()) {
-                if (storedLease?.lease === lease) {
-                    await this.#cacheStorage.delete(LEASE_KEY);
-                }
-                this.#finish(lease, null);
-                return false;
-            }
-            let cacheable = persist && fitsStorageLimit(value);
-            if (cacheable) {
-                const expiresAt = Date.now() + APP_TOOL_CACHE_TTL_MS;
-                await this.#cacheStorage.transaction(async (transaction) => {
-                    await transaction.put(CACHE_KEY, value);
-                    await transaction.put(CACHE_METADATA_KEY, {
-                        expiresAt,
-                        version: CACHE_VERSION,
-                    });
+            const cacheable = persist && fitsStorageLimit(value);
+            let fulfillment;
+            try {
+                fulfillment = await this.#cacheStorage.transaction(async (transaction) => {
+                    const storedLease = await transaction.get(LEASE_KEY);
+                    if (storedLease?.lease !== lease
+                        || storedLease.expiresAt <= Date.now()) {
+                        if (storedLease?.lease === lease) {
+                            await transaction.delete(LEASE_KEY);
+                            await transaction.deleteAlarm();
+                        }
+                        return { accepted: false, persisted: false };
+                    }
+                    if (cacheable) {
+                        const expiresAt = Date.now() + APP_TOOL_CACHE_TTL_MS;
+                        await transaction.put(CACHE_KEY, value);
+                        await transaction.put(CACHE_METADATA_KEY, {
+                            expiresAt,
+                            version: CACHE_VERSION,
+                        });
+                        await transaction.delete(LEASE_KEY);
+                        await transaction.setAlarm(expiresAt);
+                        return { accepted: true, persisted: true };
+                    }
+                    await transaction.delete(CACHE_KEY);
+                    await transaction.delete(CACHE_METADATA_KEY);
                     await transaction.delete(LEASE_KEY);
+                    await transaction.deleteAlarm();
+                    return { accepted: true, persisted: false };
                 });
-                try {
-                    await this.#cacheStorage.setAlarm(expiresAt);
-                }
-                catch {
-                    cacheable = false;
-                    await this.#deleteAllStorage();
-                }
             }
-            else {
-                await this.#deleteAllStorage();
+            catch (error) {
+                if (!cacheable)
+                    throw error;
+                fulfillment = await this.#cacheStorage.transaction(async (transaction) => {
+                    const storedLease = await transaction.get(LEASE_KEY);
+                    if (storedLease?.lease !== lease
+                        || storedLease.expiresAt <= Date.now()) {
+                        return { accepted: false, persisted: false };
+                    }
+                    await transaction.delete(CACHE_KEY);
+                    await transaction.delete(CACHE_METADATA_KEY);
+                    await transaction.delete(LEASE_KEY);
+                    await transaction.deleteAlarm();
+                    return { accepted: true, persisted: false };
+                });
             }
-            this.#finish(lease, value);
-            return cacheable;
+            this.#finish(lease, fulfillment.accepted ? value : null);
+            return fulfillment;
         }
         async release(lease) {
-            const storedLease = await this.#cacheStorage.get(LEASE_KEY);
-            if (storedLease?.lease === lease)
-                await this.#deleteAllStorage();
+            await this.#cacheStorage.transaction(async (transaction) => {
+                const storedLease = await transaction.get(LEASE_KEY);
+                if (storedLease?.lease !== lease)
+                    return;
+                await transaction.delete(LEASE_KEY);
+                await transaction.deleteAlarm();
+            });
             this.#finish(lease, null);
         }
         async remove(value) {

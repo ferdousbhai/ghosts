@@ -1,4 +1,4 @@
-import { type AppToolCacheReservation } from "./index.js";
+import { type AppToolCacheFulfillment, type AppToolCacheReservation } from "./index.js";
 type StoredLease = Readonly<{
     expiresAt: number;
     lease: string;
@@ -15,7 +15,7 @@ export declare function appToolCacheDurableObject<Base extends DurableObjectBase
     get "__#private@#cacheStorage"(): DurableObjectStorage;
     getOrReserve(): Promise<AppToolCacheReservation>;
     renew(lease: string): Promise<boolean>;
-    fulfill(lease: string, value: string, persist: boolean): Promise<boolean>;
+    fulfill(lease: string, value: string, persist: boolean): Promise<AppToolCacheFulfillment>;
     release(lease: string): Promise<void>;
     remove(value: string): Promise<void>;
     alarm(): Promise<void>;

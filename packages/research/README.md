@@ -18,7 +18,7 @@ The package intentionally has no auth, billing, tenancy, gateway, secret, persis
 import { runNativeXSearch } from "@summonghost/research";
 
 const result = await runNativeXSearch({
-  model: "grok-4",
+  model: "grok-4.6",
   prompt: "Find current posts about durable agents.",
   transport: async (request, { signal }) => {
     const response = await fetch("https://api.x.ai/v1/responses", {
@@ -45,9 +45,9 @@ Keep credentials outside library inputs and validate redirects/DNS resolution at
 ## Consumer adaptations
 
 - `runNativeXSearch` no longer accepts a pi-ai model/stream facade or an AI SDK `LanguageModel`; pass an xAI model ID and structural `transport(request, { signal })` instead.
-- Native X usage is normalized to `{ input, output, cacheRead, cacheWrite, totalTokens, raw }`. Consumers using AI SDK or pi-ai usage names must map this object.
+- Native X usage is normalized to `{ input, output, cacheRead, cacheWrite, totalTokens, raw }`. Successful responses must include safe, nonnegative input, output, and total token counts; malformed usage is rejected rather than normalized to zero. Consumers using AI SDK or pi-ai usage names must map this object.
 - The shared `web_search` contract is the richer multi-query contract from ask-dan. Consumers using summon-ghost's former `{ query }`-only schema may continue passing just `query`, but parsed defaults are now present.
 - `x_search` uses the portable `{ query, from_date?, to_date?, depth? }` base contract. Delegated-agent tools and app-specific synthesis envelopes are intentionally excluded.
-- `formatWebSearchResults` uses the summon-ghost bounded Markdown contract and accepts only `results`; ask-dan consumers must remove the former leading `query` argument and should not expect XML.
+- `formatWebSearchResults` uses the summon-ghost bounded Markdown contract and accepts only `results`; ask-dan consumers must remove the former leading `query` argument and should not expect XML. Both Markdown formatters bound each rendered field and the aggregate output; exported `*_MAX_CHARACTERS` constants document those limits. Invalid calendar dates are omitted from formatted metadata.
 - `executeExaSearch` accepts an optional request as its third argument. summon-ghost's former execution options move to the fourth argument (or pass `{}` as request). Structural Exa clients must accept call options as a third `search` argument and forward `callOptions.signal` to their HTTP transport.
 - Exa and native X provider/transport details are not exposed through public errors. Metered native X errors attach only normalized numeric usage (never raw provider usage); consumers should log private diagnostics inside their injected structural client or transport.

@@ -203,7 +203,7 @@ function stableJsonStringify(
     }
     const record = value as Record<string, unknown>;
     serialized = `{${Object.keys(record)
-      .toSorted()
+      .sort()
       .map(
         (key) =>
           `${JSON.stringify(key)}:${stableJsonStringify(record[key], ancestors)}`,

@@ -12,6 +12,7 @@ This repository makes portable mechanisms inspectable and keeps one tested sourc
 - [`@summonghost/feedback-context`](packages/feedback-context) — provider-neutral message-feedback overlays.
 - [`@summonghost/line-edit`](packages/line-edit) — versioned numbered reads and deterministic snapshot-bound edits.
 - [`@summonghost/memory-contracts`](packages/memory-contracts) — shared `remember`/`forget` schemas and pure relationship-memory mutations.
+- [`@summonghost/pi-tool-adapter`](packages/pi-tool-adapter) — product-neutral adaptation of application tools to Pi's `AgentTool` protocol.
 - [`@summonghost/research`](packages/research) — standard research contracts, provider normalization, safe public URL reads, and pagination.
 - [`@summonghost/title-generation`](packages/title-generation) — provider-independent title prompts, provisional titles, scheduling heuristics, and output validation.
 - [`@summonghost/tool-discovery`](packages/tool-discovery) — admitted-catalog fuzzy discovery and activation state.

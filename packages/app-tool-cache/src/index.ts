@@ -12,8 +12,16 @@ export type AppToolCacheReservation =
   | Readonly<{ lease: string; status: "leader" }>
   | Readonly<{ status: "retry" }>;
 
+export type AppToolCacheFulfillment =
+  | Readonly<{ accepted: false; persisted: false }>
+  | Readonly<{ accepted: true; persisted: boolean }>;
+
 export interface AppToolCacheEntryRpc {
-  fulfill(lease: string, value: string, persist: boolean): Promise<boolean>;
+  fulfill(
+    lease: string,
+    value: string,
+    persist: boolean,
+  ): Promise<AppToolCacheFulfillment>;
   getOrReserve(): Promise<AppToolCacheReservation>;
   release(lease: string): Promise<void>;
   remove(value: string): Promise<void>;
@@ -106,21 +114,34 @@ export function createAppToolCache(
           try {
             loaded = await waitForSignal(input.load(), input.signal);
           } catch (error) {
-            stopHeartbeat();
+            await stopHeartbeat(false);
             await entry.release(reservation.lease).catch(() => {});
             throw error;
+          }
+
+          let leadershipLost: boolean;
+          try {
+            leadershipLost = await waitForSignal(
+              stopHeartbeat(),
+              input.signal,
+            );
+          } catch (error) {
+            await entry.release(reservation.lease).catch(() => {});
+            throw error;
+          }
+          if (leadershipLost) {
+            await entry.release(reservation.lease).catch(() => {});
+            continue;
           }
 
           let value: string | undefined;
           try {
             value = JSON.stringify(loaded);
           } catch {
-            stopHeartbeat();
             await entry.release(reservation.lease).catch(() => {});
             return loaded;
           }
           if (value === undefined) {
-            stopHeartbeat();
             await entry.release(reservation.lease).catch(() => {});
             return loaded;
           }
@@ -131,15 +152,20 @@ export function createAppToolCache(
           } catch {
             persist = false;
           }
-          stopHeartbeat();
           try {
-            await entry.fulfill(reservation.lease, value, persist);
+            const fulfillment = await entry.fulfill(
+              reservation.lease,
+              value,
+              persist,
+            );
+            if (!fulfillment.accepted) continue;
           } catch {
             await entry.release(reservation.lease).catch(() => {});
+            continue;
           }
           return loaded;
         } finally {
-          stopHeartbeat();
+          void stopHeartbeat(false);
         }
       }
       input.signal?.throwIfAborted();
@@ -216,26 +242,67 @@ function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown
 function startLeaseHeartbeat(
   entry: AppToolCacheEntryRpc,
   lease: string,
-): () => void {
+): (waitForInFlight?: boolean) => Promise<boolean> {
+  const retryDelayMs = 1_000;
+  let inFlight: Promise<void> | undefined;
+  let leaseDeadline = Date.now() + APP_TOOL_CACHE_LEASE_TTL_MS;
+  let leadershipLost = false;
+  let stopPromise: Promise<boolean> | undefined;
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const schedule = () => {
+
+  const schedule = (delayMs: number, isRetry: boolean) => {
     if (stopped) return;
     timer = setTimeout(() => {
       timer = undefined;
-      void entry.renew(lease).then(
+      const renewalStartedAt = Date.now();
+      const renewal = entry.renew(lease).then(
         (renewed) => {
-          if (renewed) schedule();
+          if (!renewed) {
+            leadershipLost = true;
+            return;
+          }
+          leaseDeadline = renewalStartedAt + APP_TOOL_CACHE_LEASE_TTL_MS;
+          const remainingMs = Math.max(0, leaseDeadline - Date.now());
+          schedule(remainingMs / 2, false);
         },
-        () => schedule(),
+        () => {
+          if (isRetry || stopped) return;
+          const remainingMs = leaseDeadline - Date.now();
+          if (remainingMs <= 1) return;
+          schedule(Math.min(retryDelayMs, remainingMs - 1), true);
+        },
       );
-    }, APP_TOOL_CACHE_LEASE_TTL_MS / 2);
+      inFlight = renewal;
+      void renewal.finally(() => {
+        if (inFlight === renewal) inFlight = undefined;
+      });
+    }, delayMs);
   };
-  schedule();
-  return () => {
+
+  schedule(APP_TOOL_CACHE_LEASE_TTL_MS / 2, false);
+  return (waitForInFlight = true) => {
+    if (stopPromise) return stopPromise;
     stopped = true;
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
+    stopPromise = (async () => {
+      const renewal = inFlight;
+      if (!renewal || !waitForInFlight) return leadershipLost;
+      let reachedDeadline = false;
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<void>((resolve) => {
+        deadlineTimer = setTimeout(() => {
+          reachedDeadline = true;
+          resolve();
+        }, Math.max(0, leaseDeadline - Date.now()));
+      });
+      await Promise.race([renewal, deadline]);
+      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+      if (reachedDeadline) leadershipLost = true;
+      return leadershipLost;
+    })();
+    return stopPromise;
   };
 }
 

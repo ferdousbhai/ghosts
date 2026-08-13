@@ -71,21 +71,31 @@ export function createAppToolCache(namespace) {
                         loaded = await waitForSignal(input.load(), input.signal);
                     }
                     catch (error) {
-                        stopHeartbeat();
+                        await stopHeartbeat(false);
                         await entry.release(reservation.lease).catch(() => { });
                         throw error;
+                    }
+                    let leadershipLost;
+                    try {
+                        leadershipLost = await waitForSignal(stopHeartbeat(), input.signal);
+                    }
+                    catch (error) {
+                        await entry.release(reservation.lease).catch(() => { });
+                        throw error;
+                    }
+                    if (leadershipLost) {
+                        await entry.release(reservation.lease).catch(() => { });
+                        continue;
                     }
                     let value;
                     try {
                         value = JSON.stringify(loaded);
                     }
                     catch {
-                        stopHeartbeat();
                         await entry.release(reservation.lease).catch(() => { });
                         return loaded;
                     }
                     if (value === undefined) {
-                        stopHeartbeat();
                         await entry.release(reservation.lease).catch(() => { });
                         return loaded;
                     }
@@ -96,17 +106,19 @@ export function createAppToolCache(namespace) {
                     catch {
                         persist = false;
                     }
-                    stopHeartbeat();
                     try {
-                        await entry.fulfill(reservation.lease, value, persist);
+                        const fulfillment = await entry.fulfill(reservation.lease, value, persist);
+                        if (!fulfillment.accepted)
+                            continue;
                     }
                     catch {
                         await entry.release(reservation.lease).catch(() => { });
+                        continue;
                     }
                     return loaded;
                 }
                 finally {
-                    stopHeartbeat();
+                    void stopHeartbeat(false);
                 }
             }
             input.signal?.throwIfAborted();
@@ -168,25 +180,70 @@ function isPlainRecord(value) {
     return prototype === Object.prototype || prototype === null;
 }
 function startLeaseHeartbeat(entry, lease) {
+    const retryDelayMs = 1_000;
+    let inFlight;
+    let leaseDeadline = Date.now() + APP_TOOL_CACHE_LEASE_TTL_MS;
+    let leadershipLost = false;
+    let stopPromise;
     let stopped = false;
     let timer;
-    const schedule = () => {
+    const schedule = (delayMs, isRetry) => {
         if (stopped)
             return;
         timer = setTimeout(() => {
             timer = undefined;
-            void entry.renew(lease).then((renewed) => {
-                if (renewed)
-                    schedule();
-            }, () => schedule());
-        }, APP_TOOL_CACHE_LEASE_TTL_MS / 2);
+            const renewalStartedAt = Date.now();
+            const renewal = entry.renew(lease).then((renewed) => {
+                if (!renewed) {
+                    leadershipLost = true;
+                    return;
+                }
+                leaseDeadline = renewalStartedAt + APP_TOOL_CACHE_LEASE_TTL_MS;
+                const remainingMs = Math.max(0, leaseDeadline - Date.now());
+                schedule(remainingMs / 2, false);
+            }, () => {
+                if (isRetry || stopped)
+                    return;
+                const remainingMs = leaseDeadline - Date.now();
+                if (remainingMs <= 1)
+                    return;
+                schedule(Math.min(retryDelayMs, remainingMs - 1), true);
+            });
+            inFlight = renewal;
+            void renewal.finally(() => {
+                if (inFlight === renewal)
+                    inFlight = undefined;
+            });
+        }, delayMs);
     };
-    schedule();
-    return () => {
+    schedule(APP_TOOL_CACHE_LEASE_TTL_MS / 2, false);
+    return (waitForInFlight = true) => {
+        if (stopPromise)
+            return stopPromise;
         stopped = true;
         if (timer !== undefined)
             clearTimeout(timer);
         timer = undefined;
+        stopPromise = (async () => {
+            const renewal = inFlight;
+            if (!renewal || !waitForInFlight)
+                return leadershipLost;
+            let reachedDeadline = false;
+            let deadlineTimer;
+            const deadline = new Promise((resolve) => {
+                deadlineTimer = setTimeout(() => {
+                    reachedDeadline = true;
+                    resolve();
+                }, Math.max(0, leaseDeadline - Date.now()));
+            });
+            await Promise.race([renewal, deadline]);
+            if (deadlineTimer !== undefined)
+                clearTimeout(deadlineTimer);
+            if (reachedDeadline)
+                leadershipLost = true;
+            return leadershipLost;
+        })();
+        return stopPromise;
     };
 }
 async function waitForSignal(promise, signal) {

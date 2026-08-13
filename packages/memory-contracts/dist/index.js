@@ -73,7 +73,7 @@ export class RelationshipMemoryCapacityError extends Error {
     maxLength = MAX_RELATIONSHIP_MEMORY_LENGTH;
     requiredReduction;
     constructor(currentLength, attemptedLength) {
-        const requiredReduction = Math.max(1, attemptedLength - MAX_RELATIONSHIP_MEMORY_LENGTH + 1);
+        const requiredReduction = Math.max(1, attemptedLength - MAX_RELATIONSHIP_MEMORY_LENGTH);
         super(`Relationship memory needs ${requiredReduction} fewer characters before this change can be saved`);
         this.currentLength = currentLength;
         this.attemptedLength = attemptedLength;
@@ -137,7 +137,7 @@ export function normalizeRelationshipMemoryDocument(content) {
         .trim();
 }
 export function shouldCompactRelationshipMemory(content) {
-    return content.length >= MAX_RELATIONSHIP_MEMORY_LENGTH;
+    return content.length > MAX_RELATIONSHIP_MEMORY_LENGTH;
 }
 export function assertRelationshipMemoryLength(content) {
     if (content.length > MAX_RELATIONSHIP_MEMORY_LENGTH) {
@@ -240,7 +240,7 @@ export function validateRelationshipMemoryCompaction(input) {
         throw new Error("Relationship-memory compaction returned an empty document");
     }
     if (shouldCompactRelationshipMemory(compactedContent)) {
-        throw new Error(`Relationship-memory compaction must return fewer than ${MAX_RELATIONSHIP_MEMORY_LENGTH} characters`);
+        throw new Error(`Relationship-memory compaction must return ${MAX_RELATIONSHIP_MEMORY_LENGTH} characters or fewer`);
     }
     if (compactedContent.length >= sourceContent.length) {
         throw new Error("Relationship-memory compaction did not shorten the document");
@@ -298,7 +298,7 @@ export async function executeRelationshipMemoryOperation(input) {
                 compactedContent: await input.compactor({
                     document,
                     sourceContent: content,
-                    maximumLength: MAX_RELATIONSHIP_MEMORY_LENGTH - 1,
+                    maximumLength: MAX_RELATIONSHIP_MEMORY_LENGTH,
                 }),
             });
             compacted = true;

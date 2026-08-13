@@ -65,10 +65,10 @@ describe("conversation compaction coordination", () => {
 });
 
 describe("conversation compaction controller", () => {
-  it("durably schedules proactive work without awaiting snapshot creation or duplicating it", async () => {
-    let scheduled: ScheduledConversationCompaction<string> | undefined;
+  it("does not reschedule unchanged history after successful background work", async () => {
+    const scheduled: ScheduledConversationCompaction<string>[] = [];
     const scheduleCompaction = vi.fn(async (input: ScheduledConversationCompaction<string>) => {
-      scheduled = input;
+      scheduled.push(input);
     });
     const createSnapshot = vi.fn(async () => "summary");
     const controller = createConversationCompactionController<string, string>({
@@ -86,8 +86,105 @@ describe("conversation compaction controller", () => {
 
     await controller.prepareMessages(["raw history"]);
     expect(scheduleCompaction).toHaveBeenCalledOnce();
-    await expect(scheduled?.run()).resolves.toBe("summary");
+    const firstRun = scheduled[0]!.run();
+    const repeatedRun = scheduled[0]!.run();
+    await expect(Promise.all([firstRun, repeatedRun])).resolves.toEqual([
+      "summary",
+      "summary",
+    ]);
+    await expect(scheduled[0]!.run()).resolves.toBe("summary");
+    expect(createSnapshot).toHaveBeenCalledOnce();
+    expect(controller.pending()).toBe(false);
     expect(controller.latestBlockingSnapshot()).toBeNull();
+
+    await controller.prepareMessages(["raw history"]);
+    expect(scheduleCompaction).toHaveBeenCalledOnce();
+    expect(controller.pending()).toBe(false);
+
+    await controller.prepareMessages(["raw history", "new tail"]);
+    expect(scheduleCompaction).toHaveBeenCalledTimes(2);
+    expect(controller.pending()).toBe(true);
+  });
+
+  it("clears failed background work and permits later scheduling", async () => {
+    const scheduled: ScheduledConversationCompaction<string>[] = [];
+    const createSnapshot = vi.fn()
+      .mockRejectedValueOnce(new Error("provider unavailable"))
+      .mockResolvedValueOnce("summary");
+    const controller = createConversationCompactionController<string, string>({
+      applySnapshot: ({ snapshot }) => [snapshot],
+      countInputTokens: async () => 8,
+      createSnapshot,
+      policy,
+      scheduleCompaction: async (input) => {
+        scheduled.push(input);
+      },
+    });
+
+    await controller.prepareMessages(["raw history"]);
+    await expect(scheduled[0]?.run()).rejects.toThrow("provider unavailable");
+    expect(controller.pending()).toBe(false);
+
+    await controller.prepareMessages(["raw history"]);
+    expect(scheduled).toHaveLength(2);
+    expect(controller.pending()).toBe(true);
+    await expect(scheduled[1]?.run()).resolves.toBe("summary");
+    expect(controller.pending()).toBe(false);
+  });
+
+  it("permits retry when scheduling fails after running the snapshot", async () => {
+    const scheduled: ScheduledConversationCompaction<string>[] = [];
+    const controller = createConversationCompactionController<string, string>({
+      applySnapshot: ({ snapshot }) => [snapshot],
+      countInputTokens: async () => 8,
+      createSnapshot: async () => "summary",
+      policy,
+      scheduleCompaction: async (input) => {
+        scheduled.push(input);
+        if (scheduled.length === 1) {
+          await input.run();
+          throw new Error("persistence unavailable");
+        }
+      },
+    });
+
+    await expect(controller.prepareMessages(["raw history"]))
+      .rejects.toThrow("persistence unavailable");
+    expect(controller.pending()).toBe(false);
+
+    await controller.prepareMessages(["raw history"]);
+    expect(scheduled).toHaveLength(2);
+    expect(controller.pending()).toBe(true);
+  });
+
+  it("permits retry when a failed scheduler leaves its run in flight", async () => {
+    let finishSnapshot!: (snapshot: string) => void;
+    let inFlight!: Promise<string>;
+    const scheduled: ScheduledConversationCompaction<string>[] = [];
+    const controller = createConversationCompactionController<string, string>({
+      applySnapshot: ({ snapshot }) => [snapshot],
+      countInputTokens: async () => 8,
+      createSnapshot: () => new Promise((resolve) => {
+        finishSnapshot = resolve;
+      }),
+      policy,
+      scheduleCompaction: async (input) => {
+        scheduled.push(input);
+        if (scheduled.length === 1) {
+          inFlight = input.run();
+          throw new Error("scheduling unavailable");
+        }
+      },
+    });
+
+    await expect(controller.prepareMessages(["raw history"]))
+      .rejects.toThrow("scheduling unavailable");
+    finishSnapshot("orphaned summary");
+    await expect(inFlight).resolves.toBe("orphaned summary");
+
+    await controller.prepareMessages(["raw history"]);
+    expect(scheduled).toHaveLength(2);
+    expect(controller.pending()).toBe(true);
   });
 
   it("clears superseded background state when blocking work takes over", async () => {
@@ -111,10 +208,11 @@ describe("conversation compaction controller", () => {
     expect(controller.pending()).toBe(true);
     await expect(controller.prepareMessages(["raw"])).resolves.toEqual(["summary-2"]);
     expect(controller.pending()).toBe(false);
-    await expect(scheduled[0]?.run()).rejects.toBeInstanceOf(ConversationCompactionSupersededError);
 
     await controller.prepareMessages(["raw", "tail"]);
     expect(scheduled).toHaveLength(2);
+    expect(controller.pending()).toBe(true);
+    await expect(scheduled[0]?.run()).rejects.toBeInstanceOf(ConversationCompactionSupersededError);
     expect(controller.pending()).toBe(true);
   });
 

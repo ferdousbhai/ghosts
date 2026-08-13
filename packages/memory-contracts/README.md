@@ -29,7 +29,7 @@ forgetInputSchema.parse({
 - `relationshipMemoryMutationSchema`: the append/replace union
 - `relationshipMemoryOperationSchema`: the strict mutate/compact state-transition union
 
-An empty `newText` removes the uniquely matched `oldText`. The workflow schemas allow exact multi-line blocks and bound each mutation string to `MAX_RELATIONSHIP_MEMORY_LENGTH`. These functions perform no I/O.
+An empty `newText` removes the uniquely matched `oldText`. The workflow schemas allow exact multi-line blocks and bound each mutation string to `MAX_RELATIONSHIP_MEMORY_LENGTH`. The maximum is inclusive: a document exactly that length is valid, and compaction is required only when a mutation's resulting document exceeds it. Compactors receive the same inclusive maximum and may return a document exactly that length when it shortens the source. These functions perform no I/O.
 
 ## State machine boundary
 

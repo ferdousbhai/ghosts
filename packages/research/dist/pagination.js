@@ -128,7 +128,7 @@ function stableJsonStringify(value, ancestors) {
         }
         const record = value;
         serialized = `{${Object.keys(record)
-            .toSorted()
+            .sort()
             .map((key) => `${JSON.stringify(key)}:${stableJsonStringify(record[key], ancestors)}`)
             .join(",")}}`;
     }
