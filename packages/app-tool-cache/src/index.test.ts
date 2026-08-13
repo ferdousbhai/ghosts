@@ -335,10 +335,12 @@ describe("app-wide tool cache client", () => {
         load: () => provider,
         signal: controller.signal,
       });
+      await vi.waitFor(() => expect(entry.getOrReserve).toHaveBeenCalledOnce());
       await vi.advanceTimersByTimeAsync(APP_TOOL_CACHE_LEASE_TTL_MS / 2);
+      expect(entry.renew).toHaveBeenCalledWith("uncertain-lease");
       finish("provider result");
-      await vi.advanceTimersByTimeAsync(0);
-
+      await Promise.resolve();
+      await Promise.resolve();
       controller.abort();
       await expect(result).rejects.toMatchObject({ name: "AbortError" });
       expect(entry.release).toHaveBeenCalledWith("uncertain-lease");
