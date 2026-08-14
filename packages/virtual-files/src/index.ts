@@ -53,6 +53,180 @@ export type VirtualFindPage = Readonly<{
   query?: string;
 }>;
 
+export type BoundedTextLineReadOptions = Readonly<{
+  stream: ReadableStream<Uint8Array>;
+  sizeBytes: number;
+  offset?: number;
+  limit?: number;
+  maxLines: number;
+  maxBytes: number;
+}>;
+
+export type BoundedTextLineReadResult = Readonly<{
+  content: string;
+  startLine: number;
+  endLine: number;
+  totalLines: number | null;
+  truncated: boolean;
+  nextOffset?: number;
+}>;
+
+/** Detect whether a bounded file prefix is safe to decode as ordinary text. */
+export function isLikelyTextPrefix(bytes: Uint8Array): boolean {
+  if (bytes.length === 0) return true;
+  if (bytes.includes(0)) return false;
+  const text = new TextDecoder().decode(bytes);
+  if (text.length === 0) return true;
+  let replacements = 0;
+  for (const character of text) {
+    if (character === "�") replacements += 1;
+  }
+  if (replacements / text.length < 0.01) return true;
+  if (replacements > 2) return false;
+  return [...text].some((character) =>
+    character !== "�" && (
+      character >= " "
+      || character === "\n"
+      || character === "\r"
+      || character === "\t"
+    )
+  );
+}
+
+/**
+ * Read one bounded, one-indexed page from a byte stream without buffering the
+ * complete virtual file. A terminal newline ends the last logical line.
+ */
+export async function readBoundedTextLines(
+  options: BoundedTextLineReadOptions,
+): Promise<BoundedTextLineReadResult> {
+  assertPositiveInteger(options.maxLines, "maxLines");
+  assertPositiveInteger(options.maxBytes, "maxBytes");
+  if (!Number.isSafeInteger(options.sizeBytes) || options.sizeBytes < 0) {
+    throw new Error("sizeBytes must be a non-negative safe integer");
+  }
+  const offset = options.offset ?? 1;
+  assertPositiveInteger(offset, "offset");
+  if (options.limit !== undefined) assertPositiveInteger(options.limit, "limit");
+  const lineCap = Math.min(options.limit ?? options.maxLines, options.maxLines);
+  const reader = options.stream.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  const encoder = new TextEncoder();
+  const selected: string[] = [];
+  let selectedBytes = 0;
+  let currentLine = 1;
+  let absoluteOffset = 0;
+  let lineBytes: number[] = [];
+  let lineByteLength = 0;
+  let truncated = false;
+  let nextOffset: number | undefined;
+  let stopped = false;
+
+  const append = (part: Uint8Array) => {
+    lineByteLength += part.byteLength;
+    const remaining = options.maxBytes + 1 - lineBytes.length;
+    if (remaining <= 0) return;
+    for (const byte of part.subarray(0, remaining)) lineBytes.push(byte);
+  };
+
+  const finishLine = (): boolean => {
+    if (currentLine < offset) {
+      currentLine += 1;
+      lineBytes = [];
+      lineByteLength = 0;
+      return true;
+    }
+    if (selected.length >= lineCap) {
+      truncated = true;
+      nextOffset = currentLine;
+      return false;
+    }
+    const content = decoder.decode(Uint8Array.from(lineBytes));
+    const outputBytes = encoder.encode(content).byteLength
+      + (selected.length === 0 ? 0 : 1);
+    if (
+      selected.length === 0
+      && (lineByteLength > options.maxBytes || outputBytes > options.maxBytes)
+    ) {
+      throw new Error(`Line ${currentLine} exceeds the ${options.maxBytes}-byte read cap.`);
+    }
+    if (selectedBytes + outputBytes > options.maxBytes || lineByteLength > options.maxBytes) {
+      truncated = true;
+      nextOffset = currentLine;
+      return false;
+    }
+    selected.push(content);
+    selectedBytes += outputBytes;
+    currentLine += 1;
+    lineBytes = [];
+    lineByteLength = 0;
+    return true;
+  };
+
+  try {
+    while (!stopped) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      let cursor = 0;
+      while (cursor < value.byteLength) {
+        const newline = value.indexOf(10, cursor);
+        if (newline === -1) {
+          append(value.subarray(cursor));
+          break;
+        }
+        append(value.subarray(cursor, newline));
+        const afterNewline = absoluteOffset + newline + 1;
+        if (!finishLine()) {
+          stopped = true;
+          break;
+        }
+        cursor = newline + 1;
+        if (selected.length >= lineCap && afterNewline < options.sizeBytes) {
+          truncated = true;
+          nextOffset = currentLine;
+          stopped = true;
+          break;
+        }
+      }
+      absoluteOffset += value.byteLength;
+    }
+    if (!stopped && lineByteLength > 0) finishLine();
+  } finally {
+    if (stopped) await reader.cancel();
+    reader.releaseLock();
+  }
+
+  const linesSeen = currentLine - 1;
+  if (selected.length === 0) {
+    if (options.sizeBytes === 0) {
+      if (offset !== 1) {
+        throw new Error(`Offset ${offset} is beyond end of content (0 lines).`);
+      }
+      return {
+        content: "",
+        startLine: 1,
+        endLine: 0,
+        totalLines: 0,
+        truncated: false,
+      };
+    }
+    if (offset > Math.max(1, linesSeen)) {
+      throw new Error(`Offset ${offset} is beyond end of content (${linesSeen} lines).`);
+    }
+  }
+
+  const endLine = offset + selected.length - 1;
+  return {
+    content: selected.join("\n"),
+    startLine: offset,
+    endLine,
+    totalLines: truncated ? null : linesSeen,
+    truncated,
+    ...(truncated ? { nextOffset: nextOffset ?? endLine + 1 } : {}),
+  };
+}
+
 export const VIRTUAL_FILE_SEARCH_FIELD_WEIGHTS = Object.freeze({
   title: 8,
   tags: 4,
@@ -307,4 +481,10 @@ function escapeXml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;");
+}
+
+function assertPositiveInteger(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive safe integer`);
+  }
 }

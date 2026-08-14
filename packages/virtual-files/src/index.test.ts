@@ -3,7 +3,9 @@ import {
   buildVirtualFileFtsQuery,
   createVirtualFileSearchIndex,
   formatVirtualFindPage,
+  isLikelyTextPrefix,
   normalizeVirtualFileSearchText,
+  readBoundedTextLines,
   virtualFindInputSchema,
 } from "./index.js";
 
@@ -62,5 +64,66 @@ describe("@summonghost/virtual-files", () => {
       'path="/workspace/notes/pricing&amp;plans.md"',
     );
     expect(output).not.toContain("revision=");
+  });
+
+  it("reads a bounded page without consuming the complete byte stream", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("one\ntwo\nthree\nfour"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    await expect(readBoundedTextLines({
+      stream,
+      sizeBytes: 18,
+      offset: 2,
+      limit: 2,
+      maxLines: 10,
+      maxBytes: 100,
+    })).resolves.toEqual({
+      content: "two\nthree",
+      startLine: 2,
+      endLine: 3,
+      totalLines: null,
+      truncated: true,
+      nextOffset: 4,
+    });
+    expect(cancelled).toBe(true);
+  });
+
+  it("enforces byte and offset bounds across streamed chunks", async () => {
+    const encode = (value: string) => new TextEncoder().encode(value);
+    await expect(readBoundedTextLines({
+      stream: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encode("alpha"));
+          controller.enqueue(encode(" beta\nnext"));
+          controller.close();
+        },
+      }),
+      sizeBytes: 15,
+      maxLines: 10,
+      maxBytes: 5,
+    })).rejects.toThrow("Line 1 exceeds");
+    await expect(readBoundedTextLines({
+      stream: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encode("one\ntwo"));
+          controller.close();
+        },
+      }),
+      sizeBytes: 7,
+      offset: 3,
+      maxLines: 10,
+      maxBytes: 100,
+    })).rejects.toThrow("Offset 3 is beyond end");
+  });
+
+  it("distinguishes ordinary UTF-8 text from binary prefixes", () => {
+    expect(isLikelyTextPrefix(new TextEncoder().encode("hello\nworld"))).toBe(true);
+    expect(isLikelyTextPrefix(Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0))).toBe(false);
   });
 });

@@ -10,6 +10,10 @@ and read/write execution. They must supply only entries already admitted for the
 current caller and must re-authorize every later read; a returned path is a
 reference, never a capability.
 
+`readBoundedTextLines` provides a framework-neutral streaming read boundary. It
+caps lines and UTF-8 output without buffering the complete file; consumers still
+own path authorization, binary-file policy, and storage access.
+
 `find` deliberately covers both inventory and content discovery:
 
 - omit `query` to enumerate entries recursively under `root`;

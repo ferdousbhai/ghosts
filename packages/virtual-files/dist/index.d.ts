@@ -43,6 +43,29 @@ export type VirtualFindPage = Readonly<{
     root: string;
     query?: string;
 }>;
+export type BoundedTextLineReadOptions = Readonly<{
+    stream: ReadableStream<Uint8Array>;
+    sizeBytes: number;
+    offset?: number;
+    limit?: number;
+    maxLines: number;
+    maxBytes: number;
+}>;
+export type BoundedTextLineReadResult = Readonly<{
+    content: string;
+    startLine: number;
+    endLine: number;
+    totalLines: number | null;
+    truncated: boolean;
+    nextOffset?: number;
+}>;
+/** Detect whether a bounded file prefix is safe to decode as ordinary text. */
+export declare function isLikelyTextPrefix(bytes: Uint8Array): boolean;
+/**
+ * Read one bounded, one-indexed page from a byte stream without buffering the
+ * complete virtual file. A terminal newline ends the last logical line.
+ */
+export declare function readBoundedTextLines(options: BoundedTextLineReadOptions): Promise<BoundedTextLineReadResult>;
 export declare const VIRTUAL_FILE_SEARCH_FIELD_WEIGHTS: Readonly<{
     title: 8;
     tags: 4;
