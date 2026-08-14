@@ -143,6 +143,30 @@ export type ToolDefinition<TInput = unknown, TOutput = unknown> = Readonly<{
   inputSchema: ToolInputSchema;
 }>;
 
+/** Infer an executor input from a Standard Schema (including Zod 4 schemas). */
+export type InferToolInput<TSchema> =
+  TSchema extends StandardSchemaV1<infer TInput>
+    ? TInput
+    : TSchema extends ZodSchemaLike<infer TInput>
+      ? TInput
+      : unknown;
+
+export type ToolDefinitionForSchema<
+  TSchema extends ToolInputSchema,
+  TOutput = unknown,
+> = Omit<ToolDefinition<InferToolInput<TSchema>, TOutput>, "inputSchema"> &
+  Readonly<{ inputSchema: TSchema }>;
+
+/** Declare a portable tool while retaining input inference from its schema. */
+export function defineTool<
+  TSchema extends ToolInputSchema,
+  TOutput = unknown,
+>(
+  definition: ToolDefinitionForSchema<TSchema, TOutput>,
+): ToolDefinitionForSchema<TSchema, TOutput> {
+  return definition;
+}
+
 export type ToolInvocationContext<TInput = unknown> = Readonly<{
   input: TInput;
   name: string;

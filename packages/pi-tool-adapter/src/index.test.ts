@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   adaptPiTool,
+  defineTool,
   isPiToolResult,
   stringifyToolResult,
   toDraft07JsonSchema,
@@ -32,6 +33,17 @@ afterEach(() => {
 });
 
 describe("schema conversion", () => {
+  it("defines portable tools without wrapping their schema or executor", async () => {
+    const inputSchema = standardSchema((value) => ({ value: String(value) }));
+    const execute = vi.fn(async (input: string) => input.toUpperCase());
+    const definition = defineTool({ inputSchema, execute });
+
+    expect(definition).toEqual({ inputSchema, execute });
+    await expect(definition.execute?.("hello", {
+      toolCallId: "call-1",
+    })).resolves.toBe("HELLO");
+  });
+
   it("exposes a compact model schema while retaining strict validation", async () => {
     const validation = zodLike({
       safeParseAsync: vi.fn(async (value: unknown) =>
