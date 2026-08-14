@@ -238,8 +238,7 @@ export function formatMemoryLines(lines: readonly string[]): string {
 }
 
 export function normalizeRelationshipMemoryDocument(content: string): string {
-  return content
-    .replace(/\r\n?/g, "\n")
+  return normalizeLineEndings(content)
     .split("\n")
     .map((line) => line.trimEnd())
     .join("\n")

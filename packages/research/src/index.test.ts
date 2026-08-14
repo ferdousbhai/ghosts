@@ -186,8 +186,7 @@ describe("provider normalization", () => {
 
     await expect(executeExaSearch({ search }, "agents"))
       .rejects.toThrow(/^Exa research failed$/);
-    await expect(executeExaSearch({ search }, "agents"))
-      .rejects.not.toThrow("private Exa response detail");
+    expect(search).toHaveBeenCalledOnce();
 
     const malformedSearch = vi.fn().mockResolvedValue({
       results: [{ url: "private malformed provider value" }],

@@ -65,8 +65,7 @@ export function sliceTextPage(value, contentStart, maxCharacters) {
 /** Return one immutable offset page from an exact snapshot. */
 export function toolResultPage(snapshot, contentStart = 0, maxCharacters = TOOL_RESULT_PAGE_DEFAULT_CHARACTERS) {
     const limit = boundedInteger(Math.floor(maxCharacters), TOOL_RESULT_PAGE_DEFAULT_CHARACTERS, TOOL_RESULT_PAGE_MAX_CHARACTERS);
-    const requestedStart = Math.min(Math.max(0, Number.isSafeInteger(contentStart) ? contentStart : 0), snapshot.content.length);
-    const sliced = sliceTextPage(snapshot.content, requestedStart, limit);
+    const sliced = sliceTextPage(snapshot.content, contentStart, limit);
     const { content, contentStart: start, contentEnd: end } = sliced;
     return Object.freeze({
         content,

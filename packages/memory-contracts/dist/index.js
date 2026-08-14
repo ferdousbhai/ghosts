@@ -129,8 +129,7 @@ export function formatMemoryLines(lines) {
     return lines.map((line) => `- ${normalizeMemoryLine(line)}`).join("\n");
 }
 export function normalizeRelationshipMemoryDocument(content) {
-    return content
-        .replace(/\r\n?/g, "\n")
+    return normalizeLineEndings(content)
         .split("\n")
         .map((line) => line.trimEnd())
         .join("\n")

@@ -44,7 +44,7 @@ export function buildVirtualFileFtsQuery(query) {
     const terms = uniqueVirtualFileSearchTerms(query);
     if (terms.length === 0)
         return null;
-    return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
+    return terms.map((term) => `"${term}"`).join(" OR ");
 }
 export function createVirtualFileSearchIndex(documents) {
     const indexedDocuments = [];

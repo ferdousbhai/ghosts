@@ -108,8 +108,6 @@ describe("xAI native compaction adapter", () => {
     });
     await expect(httpFailure.countInputTokens({ items: [], model: "test-model" }))
       .rejects.toThrow(/^xAI context token counting failed \(403\)$/);
-    await expect(httpFailure.countInputTokens({ items: [], model: "test-model" }))
-      .rejects.not.toThrow("private provider detail");
 
     const transportFailure = createXaiCompactionAdapter({
       request: async () => {

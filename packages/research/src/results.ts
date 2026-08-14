@@ -25,12 +25,10 @@ export function formatWebSearchResults(
     .slice(0, WEB_SEARCH_MODEL_MAX_RESULTS)
     .map((result, index) => {
       const heading = formatMarkdownResultHeading(result, index);
-      const excerpt = truncateText(
+      const excerpt =
         compactHighlights(result.highlights) ||
-          compactBoundedText(result.summary, WEB_SEARCH_MODEL_EXCERPT_MAX_CHARACTERS) ||
-          compactBoundedText(result.text, WEB_SEARCH_MODEL_EXCERPT_MAX_CHARACTERS),
-        WEB_SEARCH_MODEL_EXCERPT_MAX_CHARACTERS,
-      );
+        compactBoundedText(result.summary, WEB_SEARCH_MODEL_EXCERPT_MAX_CHARACTERS) ||
+        compactBoundedText(result.text, WEB_SEARCH_MODEL_EXCERPT_MAX_CHARACTERS);
       return excerpt ? `${heading}\n> ${excerpt}` : heading;
     });
   return joinBoundedResults(entries, WEB_SEARCH_MODEL_MAX_CHARACTERS);
@@ -129,11 +127,6 @@ function compactDate(value: string | undefined): string {
   const date = compactBoundedText(value, RESEARCH_RESULT_DATE_MAX_CHARACTERS);
   if (isoDateSchema.safeParse(date).success) return date;
   return isoDateTimeSchema.safeParse(date).success ? date.slice(0, 10) : "";
-}
-
-function truncateText(value: string, maxCharacters: number): string {
-  if (value.length <= maxCharacters) return value;
-  return indicateTruncation(value, maxCharacters);
 }
 
 function indicateTruncation(value: string, maxCharacters: number): string {

@@ -14,6 +14,7 @@ const piTool = adaptPiTool({
   validateArguments?,
   timeoutMs?,
   createTimeoutError?,
+  preferCaughtErrorOverAbort?,
   mapUpdate?,
   mapResult?,
   resultMetadata?,
@@ -122,7 +123,7 @@ This is deliberate: model/provider schema checks are not a trust boundary, and t
 All hooks are mechanisms; the host supplies policy.
 
 - **Labels:** `label` is a string or resolver. Empty labels fail at adaptation time.
-- **Timeout:** `timeoutMs` is a number or per-call resolver. It starts after validation and creates a cooperative execution abort signal. `createTimeoutError` maps expiry to a product error; otherwise `ToolTimeoutError` is used. There is no default timeout.
+- **Timeout:** `timeoutMs` is a number or per-call resolver. It starts after validation and creates a cooperative execution abort signal. `createTimeoutError` maps expiry to a product error; otherwise `ToolTimeoutError` is used. There is no default timeout. `preferCaughtErrorOverAbort` narrowly preserves selected safety-critical executor failures discovered while abort cleanup settles.
 - **Updates:** executor updates are wrapped as data by default. `mapUpdate` is a trusted host hook that can bound or explicitly reshape each update into a Pi result before Pi receives it.
 - **Bounding and pagination:** `mapResult(defaultResult, context)` is a trusted host hook that can invoke a result boundary/store and return bounded text plus opaque pagination details. A synchronous store provides retention, not async durability; hosts coordinate durable persistence outside that boundary. There are no package-selected size or retention limits.
 - **Terminal/dynamic-tool metadata:** `resultMetadata(context)` is a trusted host hook that supplies Pi's `terminate` and `addedToolNames` fields. `addedToolNames` declares names already introduced by the host; it does not register tools or change Pi's active tool set. Product-specific registration and marker names stay outside this package.

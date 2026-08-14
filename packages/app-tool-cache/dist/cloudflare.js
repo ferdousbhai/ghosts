@@ -31,7 +31,7 @@ export function appToolCacheDurableObject(DurableObjectBaseClass) {
                 await this.#cacheStorage.delete(CACHE_KEY);
                 await this.#cacheStorage.delete(CACHE_METADATA_KEY);
             }
-            if (storedLease?.expiresAt && storedLease.expiresAt > now) {
+            if (storedLease && storedLease.expiresAt > now) {
                 const pending = this.#ensurePending(storedLease);
                 const value = await pending.promise;
                 return value === null ? { status: "retry" } : { status: "hit", value };
@@ -136,7 +136,7 @@ export function appToolCacheDurableObject(DurableObjectBaseClass) {
                 return;
             await this.#cacheStorage.delete(CACHE_KEY);
             await this.#cacheStorage.delete(CACHE_METADATA_KEY);
-            if (storedLease?.expiresAt && storedLease.expiresAt > Date.now()) {
+            if (storedLease && storedLease.expiresAt > Date.now()) {
                 return;
             }
             if (storedLease) {
@@ -163,7 +163,7 @@ export function appToolCacheDurableObject(DurableObjectBaseClass) {
                 await this.#cacheStorage.delete(CACHE_KEY);
                 await this.#cacheStorage.delete(CACHE_METADATA_KEY);
             }
-            if (storedLease?.expiresAt && storedLease.expiresAt > now) {
+            if (storedLease && storedLease.expiresAt > now) {
                 expirations.push(storedLease.expiresAt);
             }
             else if (storedLease) {

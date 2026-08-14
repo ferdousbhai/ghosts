@@ -167,11 +167,7 @@ export function toolResultPage(
     TOOL_RESULT_PAGE_DEFAULT_CHARACTERS,
     TOOL_RESULT_PAGE_MAX_CHARACTERS,
   );
-  const requestedStart = Math.min(
-    Math.max(0, Number.isSafeInteger(contentStart) ? contentStart : 0),
-    snapshot.content.length,
-  );
-  const sliced = sliceTextPage(snapshot.content, requestedStart, limit);
+  const sliced = sliceTextPage(snapshot.content, contentStart, limit);
   const { content, contentStart: start, contentEnd: end } = sliced;
   return Object.freeze({
     content,

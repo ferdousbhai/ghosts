@@ -121,12 +121,9 @@ describe("context document helpers", () => {
       description: "Use when sources are needed.",
       markdown: "# Research\n\nNever invent <sources>.",
     };
-    expect(formatContextDocumentCatalog([document])).not.toContain(
-      "Never invent",
-    );
-    expect(formatContextDocumentCatalog([document])).toContain(
-      "research&amp;brief",
-    );
+    const catalog = formatContextDocumentCatalog([document]);
+    expect(catalog).not.toContain("Never invent");
+    expect(catalog).toContain("research&amp;brief");
     expect(formatContextDocument(document)).toContain(
       "Never invent &lt;sources&gt;.",
     );

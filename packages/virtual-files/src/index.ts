@@ -87,7 +87,7 @@ export function uniqueVirtualFileSearchTerms(
 export function buildVirtualFileFtsQuery(query: string): string | null {
   const terms = uniqueVirtualFileSearchTerms(query);
   if (terms.length === 0) return null;
-  return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
+  return terms.map((term) => `"${term}"`).join(" OR ");
 }
 
 type IndexedDocument<T extends VirtualFileSearchDocument> = Readonly<{
