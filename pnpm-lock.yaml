@@ -55,6 +55,12 @@ importers:
 
   packages/tool-results: {}
 
+  packages/virtual-files:
+    dependencies:
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+
 packages:
 
   '@anthropic-ai/sdk@0.91.1':
