@@ -1,5 +1,9 @@
 const DRAFT_07_SCHEMA = "http://json-schema.org/draft-07/schema#";
 const MAX_TIMER_MILLISECONDS = 2_147_483_647;
+/** Declare a portable tool while retaining input inference from its schema. */
+export function defineTool(definition) {
+    return definition;
+}
 export class ToolSchemaError extends Error {
     name = "ToolSchemaError";
 }
