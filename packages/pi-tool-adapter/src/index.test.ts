@@ -249,7 +249,7 @@ describe("argument validation", () => {
     await expect(
       validateToolArguments(
         standardSchema(() => ({
-          issues: [{ message: "first" }, {}, { message: "third" }],
+          issues: [{ message: "first" }, {} as never, { message: "third" }],
         })),
         null,
         { name: "submit" },

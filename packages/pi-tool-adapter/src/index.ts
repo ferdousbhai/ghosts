@@ -86,8 +86,7 @@ export interface PiAgentTool<TDetails = unknown> {
 }
 
 export type StandardSchemaIssue = Readonly<{
-  message?: string;
-  path?: unknown;
+  message: string;
 }>;
 
 export type StandardSchemaResult<T = unknown> =

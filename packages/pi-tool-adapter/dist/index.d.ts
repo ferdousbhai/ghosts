@@ -58,8 +58,7 @@ export interface PiAgentTool<TDetails = unknown> {
     execute(toolCallId: string, parameters: unknown, signal?: AbortSignal, onUpdate?: PiToolUpdateCallback<TDetails>): Promise<PiToolResult<TDetails>>;
 }
 export type StandardSchemaIssue = Readonly<{
-    message?: string;
-    path?: unknown;
+    message: string;
 }>;
 export type StandardSchemaResult<T = unknown> = Readonly<{
     value: T;
