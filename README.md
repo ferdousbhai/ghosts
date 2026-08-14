@@ -1,10 +1,17 @@
 # ghosts
 
-Public, reusable foundations shared by [`summon-ghost`](https://github.com/ferdousbhai/summon-ghost) and [`ghost-build`](https://github.com/ferdousbhai/ghost-build).
+> [!IMPORTANT]
+> This repository is deprecated and archived. Its former consumers now own
+> their implementations directly. The history remains available so old exact
+> Git SHA dependencies can still be inspected and resolved.
 
-This repository makes portable mechanisms inspectable and keeps one tested source of truth for code shared by those applications. It does **not** contain production secrets, private prompts, user data, authentication policy, billing policy, or application-specific authorization.
+No package in this repository is maintained or supported for new use. Use the
+application-owned implementations in
+[`summon-ghost`](https://github.com/ferdousbhai/summon-ghost),
+[`ghost-build`](https://github.com/ferdousbhai/ghost-build), or
+[`ask-dan`](https://github.com/ferdousbhai/ask-dan) instead.
 
-## Packages
+## Historical packages
 
 - [`@summonghost/app-tool-cache`](packages/app-tool-cache) — exact-request caching, canonical keys, concurrent-miss coordination, and a Cloudflare Durable Object storage adapter.
 - [`@summonghost/compaction`](packages/compaction) — provider-neutral conversation compaction policy and controller, with an injected xAI adapter.
@@ -18,15 +25,16 @@ This repository makes portable mechanisms inspectable and keeps one tested sourc
 - [`@summonghost/tool-discovery`](packages/tool-discovery) — admitted-catalog fuzzy discovery and activation state.
 - [`@summonghost/tool-results`](packages/tool-results) — bounded private result snapshots and Unicode-safe pagination.
 
-Packages are currently consumed from exact Git commit SHAs. They are not published to npm yet.
+These packages were consumed from exact Git commit SHAs and were never
+published to npm.
 
-## Boundary
+## Historical boundary
 
 Packages own portable contracts and mechanisms. Applications continue to own authentication, authorization, tenant isolation, billing, persistence, tool availability, product prompts, and telemetry policy.
 
-See [`docs/architecture.md`](docs/architecture.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
+See [`docs/architecture.md`](docs/architecture.md) for the former design.
 
-## Development
+## Historical verification
 
 ```sh
 pnpm install

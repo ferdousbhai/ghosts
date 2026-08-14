@@ -1,24 +1,10 @@
 # ghosts
 
-Public reusable modules for `summon-ghost` and `ghost-build`.
+Deprecated historical source. All former consumers now own their implementations.
 
 ## Rules
 
-- Keep packages product-neutral, inspectable, and safe to publish. Never add secrets, user data, private prompts, deployment identifiers, or application-specific authorization/billing policy.
-- Maintain application-specific compatibility only for `summon-ghost` and `ghost-build`; keep every other package contract product-neutral.
-- Prefer pure contracts and mechanisms with consumer-injected provider, persistence, billing, and telemetry adapters.
-- Preserve trust-boundary validation and deterministic behavior. Add focused tests for every nontrivial contract.
-- Work on `main`; no branches, worktrees, or PRs unless requested.
-- Before handoff, run `pnpm check` and `git diff --check`.
-
-## Coordinated consumer updates
-
-Consumers pin packages to an exact reachable Git commit. For a breaking or behavioral change:
-
-1. Update this repository and its tests first; run `pnpm check`, which also verifies that rebuilt `dist` artifacts are committed.
-2. During local coordination, consumers may temporarily use `link:<relative-path-to-ghosts>/packages/<package>` (relative to the consumer package manifest); never commit or push a `link:`, `file:`, branch, or moving-main dependency.
-3. Run the affected consumer tests against that local link.
-4. Commit and push `ghosts`, then obtain the immutable commit SHA.
-5. Replace each temporary link with `github:ferdousbhai/ghosts#<full-sha>&path:/packages/<package>`, refresh its lockfile, and rerun that consumer's complete checks.
-6. Update consumers independently; do not push a consumer until the pinned `ghosts` commit is publicly reachable.
-7. Keep application adapters thin and remove superseded local implementations in the same change.
+- Do not add features, packages, consumers, releases, or compatibility work.
+- Preserve Git history and existing package artifacts so old exact-SHA dependencies remain inspectable and resolvable.
+- Never add secrets, user data, private prompts, deployment identifiers, or application-specific authorization or billing policy.
+- If an exceptional archival correction is required, keep it documentation-only unless explicitly authorized, work on `main`, and run `git diff --check` before handoff.
