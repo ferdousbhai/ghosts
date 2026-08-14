@@ -37,8 +37,8 @@ if (output.details?.paginated) {
   const page = store.getPage({
     handle: output.details.handle,
     scope: boundary.scope,
-    contentStart: 40_000,
-    maxCharacters: 40_000,
+    contentStart: 12_000,
+    maxCharacters: 12_000,
   });
   if (page) console.log(formatStoredToolResultPage(page));
 }
@@ -52,4 +52,4 @@ Small results are returned directly. Oversized results are normalized to well-fo
 
 The provided in-memory implementation is process-local and non-durable; it enforces per-entry, aggregate, count, and TTL limits. Other synchronous implementations must preserve the same snapshot, scope, and retention guarantees. Hosts that require async durable persistence must coordinate it outside this interface and decide how it relates to synchronous handle redemption. Never expose scopes to the model or treat a handle alone as authorization. Host applications remain responsible for caller authorization and tenant isolation.
 
-Offsets and character limits use JavaScript UTF-16 indices so they round-trip with `String.prototype.slice`. Page boundaries are adjusted to keep surrogate pairs intact; `contentStart` and `contentEnd` in the returned page are the authoritative offsets for subsequent reads. Model-facing XML formatting escapes untrusted content and may shorten a page so the encoded envelope remains within the model-output limit; use its emitted `next_content_start` rather than assuming the requested page size.
+Offsets and character limits use JavaScript UTF-16 indices so they round-trip with `String.prototype.slice`. Page boundaries are adjusted to keep surrogate pairs intact; `contentStart` and `contentEnd` in the returned page are authoritative internally. Model-facing XML escapes untrusted content and may shorten a page to fit the output limit; continue from its emitted `ref` and `next` cursor.

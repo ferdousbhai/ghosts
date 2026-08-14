@@ -17,6 +17,38 @@ export class ToolTimeoutError extends Error {
         this.timeoutMs = timeoutMs;
     }
 }
+/**
+ * Keep strict host-side validation while exposing a smaller Draft-07 contract
+ * to the model. The model schema guides generation; the validation schema
+ * remains the execution trust boundary.
+ */
+export function withModelJsonSchema(validationSchema, modelSchema) {
+    const normalizedModelSchema = requireDeclaredDraft07Object(modelSchema);
+    return Object.freeze({
+        "~standard": Object.freeze({
+            version: 1,
+            vendor: "summonghost.compact-tool-schema",
+            validate: async (value) => {
+                try {
+                    return {
+                        value: await validateToolArguments(validationSchema, value),
+                    };
+                }
+                catch (error) {
+                    return { issues: [{ message: errorMessage(error) }] };
+                }
+            },
+            jsonSchema: Object.freeze({
+                input: ({ target }) => {
+                    if (target !== "draft-07") {
+                        throw new ToolSchemaError(`Unsupported model schema target: ${target}`);
+                    }
+                    return normalizedModelSchema;
+                },
+            }),
+        }),
+    });
+}
 /** Convert Zod 4, Standard Schema JSON Schema extensions, and structural schemas. */
 export function toDraft07JsonSchema(schema, options = {}) {
     let converted;

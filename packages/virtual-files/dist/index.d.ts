@@ -1,11 +1,11 @@
 import { z } from "zod";
 export declare const VIRTUAL_FIND_LIMITS: Readonly<{
-    defaultResults: 20;
+    defaultResults: 10;
     maximumResults: 100;
-    outputCharacters: 64000;
+    outputCharacters: 32000;
     pathCharacters: 1000;
     queryCharacters: 1000;
-    snippetCharacters: 240;
+    snippetCharacters: 160;
 }>;
 export declare const virtualFindInputSchema: z.ZodObject<{
     root: z.ZodString;

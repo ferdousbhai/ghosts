@@ -9,6 +9,7 @@ import {
   toPiToolResult,
   ToolTimeoutError,
   validateToolArguments,
+  withModelJsonSchema,
   type PiToolResult,
   type StandardSchemaV1,
   type ToolInputSchema,
@@ -31,6 +32,34 @@ afterEach(() => {
 });
 
 describe("schema conversion", () => {
+  it("exposes a compact model schema while retaining strict validation", async () => {
+    const validation = zodLike({
+      safeParseAsync: vi.fn(async (value: unknown) =>
+        value === "valid"
+          ? { success: true as const, data: { value: "normalized" } }
+          : { success: false as const, error: new Error("strict rejection") }
+      ),
+    });
+    const compact = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      additionalProperties: false,
+      properties: { value: { type: "string" } },
+      type: "object",
+    } as const;
+    const schema = withModelJsonSchema<{ value: string }>(validation, compact);
+
+    expect(toDraft07JsonSchema(schema)).toBe(compact);
+    await expect(validateToolArguments(schema, "valid"))
+      .resolves.toEqual({ value: "normalized" });
+    await expect(validateToolArguments(schema, "invalid"))
+      .rejects.toThrow(/strict rejection/);
+  });
+
+  it("rejects an unlabeled compact model schema", () => {
+    expect(() => withModelJsonSchema(zodLike(), objectSchema as never))
+      .toThrow(/explicitly declare Draft-07/);
+  });
+
   it("asks Zod for an input draft-07 schema with strict unrepresentable handling", () => {
     const toJSONSchema = vi.fn(() => objectSchema);
     const schema = zodLike({ toJSONSchema });

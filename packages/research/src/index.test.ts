@@ -225,8 +225,8 @@ describe("provider normalization", () => {
       title: `Result ${index}`,
       url: `https://example.com/${index}`,
     })));
-    expect(ordinary).toContain("Result 7");
-    expect(ordinary).not.toContain("Result 8");
+    expect(ordinary).toContain("Result 5");
+    expect(ordinary).not.toContain("Result 6");
 
     const suffix = "must-not-escape";
     const formatted = formatWebSearchResults(Array.from({ length: 8 }, (_, index) => ({
@@ -254,7 +254,7 @@ describe("provider normalization", () => {
       title: "Bounded highlights",
       url: "https://example.com/highlights",
     }]);
-    expect(omittedHighlight).toMatch(/\n> x{599}…$/);
+    expect(omittedHighlight).toMatch(/\n> x{399}…$/);
     expect(omittedHighlight).not.toContain("omitted");
 
     const escaped = formatWebSearchResults([{

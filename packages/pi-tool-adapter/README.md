@@ -36,6 +36,7 @@ const piTool = adaptPiTool({
 
 The package also exports:
 
+- `withModelJsonSchema(validationSchema, modelSchema)`
 - `toDraft07JsonSchema(schema, options?)`
 - `validateToolArguments(schema, input, options?)`
 - `stringifyToolResult(value)`
@@ -45,6 +46,24 @@ The package also exports:
 - `ToolSchemaError`, `ToolInputValidationError`, and `ToolTimeoutError`
 
 ## Schemas and validation
+
+### Compact model schema, strict runtime schema
+
+`withModelJsonSchema` exposes a smaller Draft-07 contract to the model while
+validating and transforming every call with the host's complete schema:
+
+```ts
+const inputSchema = withModelJsonSchema(strictZodSchema, {
+  $schema: "http://json-schema.org/draft-07/schema#",
+  type: "object",
+  properties: { ref: { type: "string" } },
+  required: ["ref"],
+  additionalProperties: false,
+});
+```
+
+The compact schema is generation guidance only. The validation schema remains
+the execution trust boundary, including refinements and transforms.
 
 ### Zod 4
 

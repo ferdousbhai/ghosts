@@ -188,6 +188,12 @@ export declare class ToolTimeoutError extends Error {
     readonly timeoutMs: number;
     constructor(toolName: string, timeoutMs: number);
 }
+/**
+ * Keep strict host-side validation while exposing a smaller Draft-07 contract
+ * to the model. The model schema guides generation; the validation schema
+ * remains the execution trust boundary.
+ */
+export declare function withModelJsonSchema<TInput = unknown>(validationSchema: ToolInputSchema, modelSchema: Draft07JsonSchema): StandardSchemaV1<TInput>;
 /** Convert Zod 4, Standard Schema JSON Schema extensions, and structural schemas. */
 export declare function toDraft07JsonSchema(schema: ToolInputSchema, options?: Readonly<{
     zodUnrepresentable?: "any" | "throw";

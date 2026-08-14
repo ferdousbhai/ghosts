@@ -46,7 +46,7 @@ describe("@summonghost/virtual-files", () => {
   });
 
   it("formats one bounded authorized page", () => {
-    expect(formatVirtualFindPage({
+    const output = formatVirtualFindPage({
       root: "/workspace/notes",
       query: "pricing",
       entries: [{
@@ -57,8 +57,10 @@ describe("@summonghost/virtual-files", () => {
         revision: 3,
         snippet: "Use <current> pricing.",
       }],
-    })).toContain(
+    });
+    expect(output).toContain(
       'path="/workspace/notes/pricing&amp;plans.md"',
     );
+    expect(output).not.toContain("revision=");
   });
 });

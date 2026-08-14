@@ -69,7 +69,7 @@ describe("tool result pagination", () => {
       toolCallId: "call-format",
       toolName: "read",
     })!;
-    expect(formatToolResultPage(snapshot, 40_000, 60_000)).toContain("END");
+    expect(formatToolResultPage(snapshot, content.length - 15_000, 16_000)).toContain("END");
   });
 
   it("uses exact offset cursors", () => {
@@ -230,14 +230,14 @@ describe("tool result pagination", () => {
     expect(boundedToolErrorMessage(new Error("x".repeat(20_000))))
       .toHaveLength(TOOL_ERROR_MAX_CHARACTERS);
 
-    const boundary = createToolResultBoundary(createInMemoryToolResultStore(), 100_000);
+    const boundary = createToolResultBoundary(createInMemoryToolResultStore(), 25_000);
     expect(boundary.deliver({
-      content: "a".repeat(60_000),
+      content: "a".repeat(14_000),
       toolCallId: "call-a",
       toolName: "a",
-    }).text).toHaveLength(60_000);
+    }).text).toHaveLength(14_000);
     expect(boundary.deliver({
-      content: "b".repeat(60_000),
+      content: "b".repeat(14_000),
       toolCallId: "call-b",
       toolName: "b",
     }).text).toContain("tool_output_budget_exhausted");
@@ -261,6 +261,8 @@ describe("tool result pagination", () => {
     }).text);
 
     expect(delivered.at(-1)).toContain("<tool_result_page");
+    expect(delivered.at(-1)).toContain('ref="tool-result-');
+    expect(delivered.at(-1)).toContain('next="');
     expect(delivered.at(-1)).toContain("&lt;");
     expect(delivered.reduce((total, text) => total + text.length, 0))
       .toBeLessThanOrEqual(512_000);

@@ -1,10 +1,10 @@
 import type { ResearchResult } from "./contracts.js";
-export declare const WEB_SEARCH_MODEL_MAX_RESULTS = 8;
-export declare const WEB_SEARCH_MODEL_EXCERPT_MAX_CHARACTERS = 600;
-export declare const WEB_SEARCH_MODEL_MAX_CHARACTERS = 8000;
+export declare const WEB_SEARCH_MODEL_MAX_RESULTS = 6;
+export declare const WEB_SEARCH_MODEL_EXCERPT_MAX_CHARACTERS = 400;
+export declare const WEB_SEARCH_MODEL_MAX_CHARACTERS = 6000;
 export declare const READ_URL_MODEL_MAX_RESULTS = 5;
-export declare const READ_URL_MODEL_CONTENT_MAX_CHARACTERS = 20000;
-export declare const READ_URL_MODEL_MAX_CHARACTERS = 100000;
+export declare const READ_URL_MODEL_CONTENT_MAX_CHARACTERS = 12000;
+export declare const READ_URL_MODEL_MAX_CHARACTERS = 60000;
 export declare const RESEARCH_RESULT_TITLE_MAX_CHARACTERS = 1000;
 export declare const RESEARCH_RESULT_AUTHOR_MAX_CHARACTERS = 200;
 export declare const RESEARCH_RESULT_URL_MAX_CHARACTERS = 4096;

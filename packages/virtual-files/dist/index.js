@@ -1,11 +1,11 @@
 import { z } from "zod";
 export const VIRTUAL_FIND_LIMITS = Object.freeze({
-    defaultResults: 20,
+    defaultResults: 10,
     maximumResults: 100,
-    outputCharacters: 64_000,
+    outputCharacters: 32_000,
     pathCharacters: 1_000,
     queryCharacters: 1_000,
-    snippetCharacters: 240,
+    snippetCharacters: 160,
 });
 export const virtualFindInputSchema = z.strictObject({
     root: z.string().trim().min(1).max(VIRTUAL_FIND_LIMITS.pathCharacters)
@@ -147,12 +147,6 @@ export function formatVirtualFindPage(page) {
                 ? [`tags="${escapeXml(entry.tags.map((tag) => `#${tag}`).join(" "))}"`]
                 : []),
             ...(entry.visibility ? [`visibility="${entry.visibility}"`] : []),
-            ...(entry.revision !== undefined
-                ? [`revision="${escapeXml(String(entry.revision))}"`]
-                : []),
-            ...(entry.createdAt !== undefined
-                ? [`created="${escapeXml(isoTimestamp(entry.createdAt))}"`]
-                : []),
             ...(entry.updatedAt !== undefined
                 ? [`updated="${escapeXml(isoTimestamp(entry.updatedAt))}"`]
                 : []),

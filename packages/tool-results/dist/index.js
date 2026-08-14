@@ -1,6 +1,6 @@
-export const MODEL_TOOL_RESULT_MAX_CHARACTERS = 64_000;
-export const TOOL_RESULT_PAGE_DEFAULT_CHARACTERS = 40_000;
-export const TOOL_RESULT_PAGE_MAX_CHARACTERS = 60_000;
+export const MODEL_TOOL_RESULT_MAX_CHARACTERS = 16_000;
+export const TOOL_RESULT_PAGE_DEFAULT_CHARACTERS = 12_000;
+export const TOOL_RESULT_PAGE_MAX_CHARACTERS = 16_000;
 export const TOOL_RESULT_SNAPSHOT_MAX_CHARACTERS = 4_000_000;
 export const TOOL_RESULT_SNAPSHOT_TTL_MS = 30 * 60 * 1000;
 export const TOOL_RESULT_SNAPSHOT_MAX_ENTRIES = 24;
@@ -375,19 +375,14 @@ function pageWithContent(page, content, localContentEnd) {
 }
 function renderStoredToolResultPage(page) {
     const attributes = [
-        `handle="${xmlAttribute(page.handle, 100)}"`,
+        `ref="${xmlAttribute(page.handle, 100)}"`,
         `tool="${xmlAttribute(page.toolName)}"`,
-        `content_start="${page.contentStart}"`,
-        `content_end="${page.contentEnd}"`,
         `shown_chars="${page.contentEnd - page.contentStart}"`,
         `total_chars="${page.totalCharacters}"`,
         `partial="${page.contentEnd < page.totalCharacters ? "true" : "false"}"`,
         ...(page.nextContentStart === undefined
             ? []
-            : [`next_content_start="${page.nextContentStart}"`]),
-        ...(page.previousContentStart === undefined
-            ? []
-            : [`previous_content_start="${page.previousContentStart}"`]),
+            : [`next="${page.nextContentStart}"`]),
     ];
     return [
         `<tool_result_page ${attributes.join(" ")}>`,
