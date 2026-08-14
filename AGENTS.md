@@ -1,10 +1,11 @@
 # ghosts
 
-Public reusable modules for SummonGhost-related applications.
+Public reusable modules for `summon-ghost` and `ghost-build`.
 
 ## Rules
 
 - Keep packages product-neutral, inspectable, and safe to publish. Never add secrets, user data, private prompts, deployment identifiers, or application-specific authorization/billing policy.
+- Maintain application-specific compatibility only for `summon-ghost` and `ghost-build`; keep every other package contract product-neutral.
 - Prefer pure contracts and mechanisms with consumer-injected provider, persistence, billing, and telemetry adapters.
 - Preserve trust-boundary validation and deterministic behavior. Add focused tests for every nontrivial contract.
 - Work on `main`; no branches, worktrees, or PRs unless requested.

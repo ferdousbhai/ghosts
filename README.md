@@ -1,8 +1,8 @@
 # ghosts
 
-Public, reusable foundations behind [SummonGhost](https://summonghost.com) and related projects.
+Public, reusable foundations shared by [`summon-ghost`](https://github.com/ferdousbhai/summon-ghost) and [`ghost-build`](https://github.com/ferdousbhai/ghost-build).
 
-This repository makes portable mechanisms inspectable and keeps one tested source of truth for code shared by SummonGhost, Ask Dan, Ghostbuild, and other applications. It does **not** contain production secrets, private prompts, user data, authentication policy, billing policy, or application-specific authorization.
+This repository makes portable mechanisms inspectable and keeps one tested source of truth for code shared by those applications. It does **not** contain production secrets, private prompts, user data, authentication policy, billing policy, or application-specific authorization.
 
 ## Packages
 

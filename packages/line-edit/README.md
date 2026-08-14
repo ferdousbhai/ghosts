@@ -1,6 +1,6 @@
 # @summonghost/line-edit
 
-Pure line-anchored read and edit mechanics shared by SummonGhost and Ghostbuild.
+Pure line-anchored read and edit mechanics shared by `summon-ghost` and `ghost-build`.
 
 The package provides:
 
@@ -58,7 +58,7 @@ Use `numberReadContent(content, startLine)` when a consumer-owned reader has alr
 
 ## Consumer operation mappings
 
-SummonGhost can retain its splice vocabulary and 50-operation limit:
+`summon-ghost` can retain its splice vocabulary and 50-operation limit:
 
 ```ts
 const applied = applyLineEdits({
@@ -73,7 +73,7 @@ const applied = applyLineEdits({
 });
 ```
 
-Ghostbuild can retain replacement ranges, after-line insertions, and its 100-operation limit:
+`ghost-build` can retain replacement ranges, after-line insertions, and its 100-operation limit:
 
 ```ts
 const applied = applyLineEdits({
@@ -91,6 +91,6 @@ const applied = applyLineEdits({
 });
 ```
 
-Every mapped `startLine` is one-indexed and addresses the original snapshot. An insertion uses `deleteLines: 0` and inserts immediately before `startLine`; therefore inserting after original line `n` maps to `startLine: n + 1`. Two insertions cannot share a boundary, replacements cannot overlap, and insertions cannot occur inside a replaced range. `allowInsertionAtReplacementStart` preserves Ghostbuild's current ability to insert immediately before a replacement at the same boundary.
+Every mapped `startLine` is one-indexed and addresses the original snapshot. An insertion uses `deleteLines: 0` and inserts immediately before `startLine`; therefore inserting after original line `n` maps to `startLine: n + 1`. Two insertions cannot share a boundary, replacements cannot overlap, and insertions cannot occur inside a replaced range. `allowInsertionAtReplacementStart` preserves `ghost-build`'s current ability to insert immediately before a replacement at the same boundary.
 
 `applyLineEdits` rejects empty batches, per-operation empty splices, out-of-bounds ranges, overlapping operations, excessive batches, and edits that produce no content change. It returns the new content plus sorted change metadata; consumers map that metadata into their own tool-result vocabulary and perform persistence only after successful validation.

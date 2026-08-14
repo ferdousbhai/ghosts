@@ -160,9 +160,8 @@ const piTool = adaptPiTool({
 
 In this example, `boundary.deliver` and its injected retention store are synchronous. The provided `@summonghost/tool-results` store is in-memory and non-durable; a host that requires async durable persistence coordinates it outside this mapping boundary.
 
-## Mapping the three existing adapters
+## Mapping the supported application adapters
 
-- **ask-dan:** pass Zod schemas directly; pass capability JSON schemas with the existing capability validator as `validateArguments`; map `__danTerminateAgent` in `resultMetadata`.
 - **summon-ghost:** use `label` for titles, adapt AI SDK `toModelOutput` inside `mapResult`, call the existing `ToolResultBoundary` there, and retain original errors in `onError`.
 - **ghost-build:** set `label` from the builder label map, resolve `timeoutMs` from builder budgets, map expiry with `createTimeoutError`, and forward canonical progress through the default `onUpdate` bridge or `mapUpdate`.
 
